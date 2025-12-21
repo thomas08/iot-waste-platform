@@ -4,43 +4,93 @@ FastAPI Backend for IoT Waste Platform Dashboard
 Provides REST API endpoints for frontend dashboard
 """
 
-from fastapi import FastAPI, HTTPException, Query
+import os
+from pathlib import Path
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from typing import List, Optional
 from datetime import datetime, timedelta
 import psycopg2
 from psycopg2.extras import RealDictCursor
 import logging
+from dotenv import load_dotenv
+import time
+
+# Load environment variables from .env file
+env_path = Path(__file__).parent.parent.parent / '.env'
+load_dotenv(dotenv_path=env_path)
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
+log_level = logging.DEBUG if os.getenv('DEBUG', 'false').lower() == 'true' else logging.INFO
+logging.basicConfig(
+    level=log_level,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
+
+# Application configuration from environment
+API_HOST = os.getenv('API_HOST', '0.0.0.0')
+API_PORT = int(os.getenv('API_PORT', '8000'))
+ENVIRONMENT = os.getenv('ENVIRONMENT', 'development')
+CORS_ORIGINS = os.getenv('API_CORS_ORIGINS', 'http://localhost:8080,http://127.0.0.1:8080').split(',')
+
+# Database configuration from environment
+DB_CONFIG = {
+    "host": os.getenv('POSTGRES_HOST', 'localhost'),
+    "port": int(os.getenv('POSTGRES_PORT', '5432')),
+    "database": os.getenv('POSTGRES_DB', 'wastedb'),
+    "user": os.getenv('POSTGRES_USER', 'admin'),
+    "password": os.getenv('POSTGRES_PASSWORD', 'rootpassword')
+}
 
 # Initialize FastAPI app
 app = FastAPI(
     title="IoT Waste Platform API",
     description="REST API for IoT Waste Management System",
-    version="1.0.0"
+    version="1.0.0",
+    docs_url="/docs" if ENVIRONMENT == 'development' else None,
+    redoc_url="/redoc" if ENVIRONMENT == 'development' else None
 )
+
+
+# Security middleware: Add security headers
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    """Add security headers to all responses"""
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    return response
+
+
+# Logging middleware
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    """Log all requests"""
+    start_time = time.time()
+    response = await call_next(request)
+    process_time = time.time() - start_time
+    logger.info(
+        f"{request.method} {request.url.path} - "
+        f"Status: {response.status_code} - "
+        f"Time: {process_time:.3f}s"
+    )
+    return response
+
 
 # Enable CORS for frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, specify actual origins
+    allow_origins=CORS_ORIGINS,  # Use environment variable
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
     allow_headers=["*"],
+    max_age=600,  # Cache preflight requests for 10 minutes
 )
-
-# Database configuration
-DB_CONFIG = {
-    "host": "localhost",
-    "port": 5432,
-    "database": "wastedb",
-    "user": "admin",
-    "password": "rootpassword"
-}
 
 
 def get_db_connection():
@@ -53,18 +103,36 @@ def get_db_connection():
         raise HTTPException(status_code=500, detail="Database connection failed")
 
 
+@app.on_event("startup")
+async def startup_event():
+    """Log startup information"""
+    logger.info("=" * 60)
+    logger.info("🗑️  IoT Waste Platform API - Starting")
+    logger.info("=" * 60)
+    logger.info(f"Environment: {ENVIRONMENT}")
+    logger.info(f"API Host: {API_HOST}")
+    logger.info(f"API Port: {API_PORT}")
+    logger.info(f"CORS Origins: {CORS_ORIGINS}")
+    logger.info(f"Database: {DB_CONFIG['host']}:{DB_CONFIG['port']}/{DB_CONFIG['database']}")
+    logger.info(f"Debug Mode: {os.getenv('DEBUG', 'false')}")
+    logger.info("=" * 60)
+
+
 @app.get("/")
 async def root():
     """Root endpoint"""
     return {
         "message": "IoT Waste Platform API",
         "version": "1.0.0",
+        "environment": ENVIRONMENT,
         "endpoints": {
             "bins": "/api/bins",
             "sensors": "/api/sensors",
             "readings": "/api/readings",
             "alerts": "/api/alerts",
-            "stats": "/api/stats"
+            "stats": "/api/stats",
+            "health": "/health",
+            "docs": "/docs" if ENVIRONMENT == 'development' else None
         }
     }
 
@@ -395,4 +463,12 @@ async def health_check():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+
+    # Run server with environment configuration
+    uvicorn.run(
+        app,
+        host=API_HOST,
+        port=API_PORT,
+        log_level="debug" if os.getenv('DEBUG', 'false').lower() == 'true' else "info",
+        access_log=True
+    )
