@@ -1,0 +1,15 @@
+# IoT Waste Platform - Python Dependencies
+# Install with: pip install -r requirements.txt
+
+# MQTT Client Library
+paho-mqtt==1.6.1
+
+# PostgreSQL Database Driver
+psycopg2-binary==2.9.9
+
+# Web Framework for Dashboard API
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+
+# Additional useful libraries
+python-dotenv==1.0.0  # For environment variables

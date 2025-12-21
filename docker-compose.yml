@@ -1,0 +1,47 @@
+services:
+  # 1. MQTT Broker (Secure)
+  mqtt:
+    image: eclipse-mosquitto:2
+    container_name: waste_mqtt
+    restart: always
+    ports:
+      - "${MQTT_PORT:-1883}:1883"
+      - "${MQTT_WEBSOCKET_PORT:-9001}:9001"
+    volumes:
+      - ./mosquitto_secure/config:/mosquitto/config
+      - ./mosquitto_secure/data:/mosquitto/data
+      - ./mosquitto_secure/log:/mosquitto/log
+    environment:
+      - TZ=${TZ:-Asia/Bangkok}
+
+  # 2. Database (PostgreSQL)
+  db:
+    image: postgres:15-alpine
+    container_name: waste_db
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-rootpassword}
+      POSTGRES_DB: ${POSTGRES_DB:-wastedb}
+      TZ: ${TZ:-Asia/Bangkok}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  # 3. DB Viewer (pgAdmin)
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: waste_pgadmin
+    restart: always
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@admin.com}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-rootpassword}
+      TZ: ${TZ:-Asia/Bangkok}
+    ports:
+      - "${PGADMIN_PORT:-5050}:80"
+    depends_on:
+      - db
+
+volumes:
+  postgres_data:
