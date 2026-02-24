@@ -13,11 +13,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 from typing import List, Optional
 from datetime import datetime, timedelta
 import psycopg2
 from psycopg2.extras import RealDictCursor
 import logging
+import re
 from dotenv import load_dotenv
 import time
 
@@ -604,6 +606,210 @@ async def verify_token(request: Request):
         "display_name": session["display_name"],
         "role":         session["role"],
     }
+
+
+# ─── Device Management ──────────────────────────────────────────────────────
+
+class DeviceItem(BaseModel):
+    mac_address: str
+    device_name: str
+    bin_id: int
+    weight_offset: float = 0.0
+
+class DeviceRegisterRequest(BaseModel):
+    devices: List[DeviceItem]
+
+
+def _require_auth(request: Request) -> dict:
+    """Check Bearer token and return session, raise 401 if invalid."""
+    auth = request.headers.get("Authorization", "")
+    token = auth.replace("Bearer ", "").strip()
+    session = _sessions.get(token)
+    if not session or datetime.now() > session["expires"]:
+        _sessions.pop(token, None)
+        raise HTTPException(status_code=401, detail="กรุณาเข้าสู่ระบบก่อน")
+    return session
+
+
+def _normalize_mac(mac: str) -> str:
+    """Uppercase and validate MAC address format AA:BB:CC:DD:EE:FF."""
+    mac = mac.strip().upper()
+    if not re.fullmatch(r'([0-9A-F]{2}:){5}[0-9A-F]{2}', mac):
+        raise HTTPException(status_code=400, detail=f"MAC address ไม่ถูกต้อง: {mac}")
+    return mac
+
+
+@app.get("/api/devices")
+async def get_devices():
+    """List all registered devices with bin/department info."""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
+        cursor.execute("""
+            SELECT
+                s.sensor_id,
+                s.sensor_code,
+                s.mac_address,
+                s.manufacturer  AS device_name,
+                s.weight_offset,
+                s.status,
+                s.bin_id,
+                wb.bin_code,
+                wb.location,
+                MAX(sr.timestamp) AS last_seen
+            FROM sensors s
+            LEFT JOIN waste_bins wb ON s.bin_id = wb.bin_id
+            LEFT JOIN sensor_readings sr ON s.sensor_id = sr.sensor_id
+            GROUP BY s.sensor_id, wb.bin_code, wb.location
+            ORDER BY s.sensor_id
+        """)
+        rows = [normalize_row(r) for r in cursor.fetchall()]
+        cursor.close()
+        conn.close()
+        return {"success": True, "count": len(rows), "data": rows}
+    except Exception as e:
+        logger.error(f"Error fetching devices: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/devices/register")
+async def register_devices(body: DeviceRegisterRequest, request: Request):
+    """Register one or more ESP32 devices (MAC address → department)."""
+    _require_auth(request)
+
+    if not body.devices:
+        raise HTTPException(status_code=400, detail="ไม่มีข้อมูลอุปกรณ์")
+
+    conn = get_db_connection()
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
+    registered = []
+    errors = []
+
+    try:
+        for item in body.devices:
+            mac = _normalize_mac(item.mac_address)
+            device_name = item.device_name.strip() or mac
+            bin_id = item.bin_id
+            weight_offset = item.weight_offset
+
+            # Verify bin exists
+            cursor.execute("SELECT bin_id, bin_code FROM waste_bins WHERE bin_id = %s AND status = 'active'", (bin_id,))
+            bin_row = cursor.fetchone()
+            if not bin_row:
+                errors.append({"mac": mac, "error": f"ไม่พบแผนก bin_id={bin_id}"})
+                continue
+
+            # Check if MAC already registered
+            cursor.execute("SELECT sensor_id, bin_id FROM sensors WHERE mac_address = %s", (mac,))
+            existing = cursor.fetchone()
+            if existing:
+                # Update existing registration
+                cursor.execute("""
+                    UPDATE sensors
+                    SET bin_id = %s, manufacturer = %s, weight_offset = %s, updated_at = NOW()
+                    WHERE mac_address = %s
+                """, (bin_id, device_name, weight_offset, mac))
+                conn.commit()
+                registered.append({"mac": mac, "bin_code": bin_row["bin_code"], "action": "updated"})
+                continue
+
+            # Generate unique sensor_code from device_name
+            base_code = re.sub(r'[^A-Za-z0-9\-_]', '-', device_name)[:40].strip('-')
+            sensor_code = base_code or f"MAC-{mac.replace(':', '')[-6:]}"
+            cursor.execute("SELECT sensor_id FROM sensors WHERE sensor_code = %s", (sensor_code,))
+            if cursor.fetchone():
+                sensor_code = f"{sensor_code[:36]}-{mac[-5:].replace(':', '')}"
+
+            cursor.execute("""
+                INSERT INTO sensors (sensor_code, bin_id, sensor_type, manufacturer, model, weight_offset, mac_address, status)
+                VALUES (%s, %s, 'weight_scale', %s, 'Senses-Scale-v2', %s, %s, 'active')
+            """, (sensor_code, bin_id, device_name, weight_offset, mac))
+            conn.commit()
+            registered.append({"mac": mac, "bin_code": bin_row["bin_code"], "sensor_code": sensor_code, "action": "created"})
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"Register device error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        cursor.close()
+        conn.close()
+
+    return {"success": True, "registered": len(registered), "results": registered, "errors": errors}
+
+
+@app.put("/api/devices/{sensor_id}")
+async def update_device(sensor_id: int, body: DeviceItem, request: Request):
+    """Update a registered device's MAC, department, or weight offset."""
+    _require_auth(request)
+    mac = _normalize_mac(body.mac_address)
+
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
+
+        cursor.execute("SELECT sensor_id FROM sensors WHERE sensor_id = %s", (sensor_id,))
+        if not cursor.fetchone():
+            raise HTTPException(status_code=404, detail="ไม่พบอุปกรณ์")
+
+        # Check MAC uniqueness (exclude self)
+        cursor.execute("SELECT sensor_id FROM sensors WHERE mac_address = %s AND sensor_id != %s", (mac, sensor_id))
+        if cursor.fetchone():
+            raise HTTPException(status_code=409, detail=f"MAC {mac} ถูกใช้งานแล้ว")
+
+        cursor.execute("""
+            UPDATE sensors
+            SET mac_address = %s, bin_id = %s, manufacturer = %s, weight_offset = %s, updated_at = NOW()
+            WHERE sensor_id = %s
+        """, (mac, body.bin_id, body.device_name.strip(), body.weight_offset, sensor_id))
+        conn.commit()
+        cursor.close()
+        conn.close()
+        return {"success": True, "message": "อัปเดตอุปกรณ์แล้ว"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Update device error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/devices/{sensor_id}")
+async def delete_device(sensor_id: int, request: Request):
+    """Unregister a device (clears MAC address). Keeps sensor record if it has readings."""
+    _require_auth(request)
+
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
+
+        cursor.execute("SELECT sensor_id, sensor_code FROM sensors WHERE sensor_id = %s", (sensor_id,))
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="ไม่พบอุปกรณ์")
+
+        # Check if it has readings — if yes, just clear MAC; if no, delete entirely
+        cursor.execute("SELECT COUNT(*) as cnt FROM sensor_readings WHERE sensor_id = %s", (sensor_id,))
+        cnt = cursor.fetchone()["cnt"]
+
+        if cnt > 0:
+            cursor.execute("UPDATE sensors SET mac_address = NULL, updated_at = NOW() WHERE sensor_id = %s", (sensor_id,))
+            conn.commit()
+            msg = "ยกเลิกการลงทะเบียน MAC แล้ว (ประวัติข้อมูลยังคงอยู่)"
+        else:
+            cursor.execute("DELETE FROM sensors WHERE sensor_id = %s", (sensor_id,))
+            conn.commit()
+            msg = "ลบอุปกรณ์แล้ว"
+
+        cursor.close()
+        conn.close()
+        return {"success": True, "message": msg}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Delete device error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/health")

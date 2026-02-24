@@ -1,0 +1,684 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Senses Scale - Add Devices</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css" rel="stylesheet">
+    <style>
+        :root {
+            --bg-page:    #FFFDE7;
+            --bg-navbar:  #FFF9C4;
+            --gold:       #E8C84B;
+            --gold-dark:  #C8A820;
+            --brown:      #5D4037;
+            --brown-dark: #4E342E;
+            --brown-mute: #8D6E63;
+            --red:        #C0392B;
+            --red-bg:     #FDE8E8;
+            --green:      #2E7D32;
+            --green-bg:   #E8F5E9;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            background: var(--bg-page);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            color: var(--brown);
+            min-height: 100vh;
+        }
+
+        /* ── Navbar ── */
+        .ss-navbar {
+            background: var(--bg-navbar);
+            border-bottom: 2px solid var(--gold);
+            padding: 0 20px;
+            height: 52px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .nav-left { display: flex; align-items: center; gap: 12px; }
+
+        .nav-back {
+            font-size: 1.3rem;
+            color: var(--brown-dark);
+            cursor: pointer;
+            background: none;
+            border: none;
+            padding: 4px 6px;
+            border-radius: 6px;
+            line-height: 1;
+            transition: background 0.12s;
+        }
+        .nav-back:hover { background: rgba(0,0,0,0.07); }
+
+        .ss-brand {
+            font-size: 1.1rem;
+            font-weight: 700;
+            color: var(--brown-dark);
+            letter-spacing: 0.01em;
+        }
+
+        .nav-logout {
+            font-size: 1.3rem;
+            color: var(--brown-mute);
+            cursor: pointer;
+            background: none;
+            border: none;
+            padding: 4px 6px;
+            border-radius: 6px;
+            line-height: 1;
+            transition: background 0.12s;
+        }
+        .nav-logout:hover { background: rgba(0,0,0,0.07); color: var(--brown-dark); }
+
+        /* ── Page ── */
+        .page-wrap {
+            max-width: 780px;
+            margin: 0 auto;
+            padding: 32px 20px 60px;
+        }
+
+        .page-title {
+            text-align: center;
+            font-size: 1.25rem;
+            font-weight: 700;
+            color: var(--brown-dark);
+            margin-bottom: 28px;
+            padding-bottom: 16px;
+            border-bottom: 2px solid var(--gold);
+        }
+
+        /* ── Device rows ── */
+        #deviceRows { display: flex; flex-direction: column; gap: 0; }
+
+        .device-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr 100px 36px;
+            gap: 10px;
+            align-items: end;
+            padding: 14px 0 14px;
+            border-bottom: 1px solid #E8C84B55;
+        }
+
+        .device-row:first-child { padding-top: 0; }
+
+        .field-group { display: flex; flex-direction: column; gap: 5px; }
+
+        .field-label {
+            font-size: 0.82rem;
+            font-weight: 600;
+            color: var(--brown-dark);
+        }
+
+        .ss-input, .ss-select {
+            width: 100%;
+            background: var(--bg-navbar);
+            border: 1.5px solid var(--gold);
+            border-radius: 6px;
+            padding: 9px 12px;
+            font-size: 0.88rem;
+            color: var(--brown-dark);
+            outline: none;
+            font-family: inherit;
+            transition: border-color 0.15s, background 0.15s;
+            appearance: none;
+        }
+        .ss-input:focus, .ss-select:focus {
+            border-color: var(--gold-dark);
+            background: #FFF9A0;
+        }
+        .ss-input::placeholder { color: var(--brown-mute); opacity: 0.7; }
+        .ss-input.error { border-color: #E57373; background: #FFF3F3; }
+
+        .ss-select {
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%238D6E63' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 10px center;
+            padding-right: 30px;
+            cursor: pointer;
+        }
+
+        .btn-remove {
+            background: none;
+            border: 1.5px solid #E57373;
+            border-radius: 6px;
+            color: #E57373;
+            font-size: 1rem;
+            cursor: pointer;
+            width: 36px;
+            height: 36px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background 0.12s;
+            align-self: flex-end;
+        }
+        .btn-remove:hover { background: #FDE8E8; }
+
+        /* ── Divider ── */
+        .divider {
+            border: none;
+            border-top: 1.5px solid var(--gold);
+            margin: 20px 0 16px;
+        }
+
+        /* ── Buttons row ── */
+        .btn-row {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .btn-add-device {
+            background: var(--bg-navbar);
+            border: 1.5px solid var(--gold);
+            border-radius: 8px;
+            color: var(--brown-dark);
+            font-size: 0.92rem;
+            font-weight: 700;
+            padding: 10px 28px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-family: inherit;
+            transition: background 0.12s;
+        }
+        .btn-add-device:hover { background: #FFF176; }
+        .btn-add-device:active { background: #F5C518; }
+
+        .btn-register {
+            background: #FFF9C4;
+            border: 2px solid var(--gold-dark);
+            border-radius: 8px;
+            color: var(--brown-dark);
+            font-size: 0.92rem;
+            font-weight: 700;
+            padding: 10px 48px;
+            cursor: pointer;
+            font-family: inherit;
+            transition: background 0.12s, opacity 0.12s;
+        }
+        .btn-register:hover:not(:disabled) { background: #FFF176; }
+        .btn-register:active:not(:disabled) { background: #F5C518; }
+        .btn-register:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        /* ── Toast / feedback ── */
+        #toast {
+            position: fixed;
+            bottom: 24px;
+            left: 50%;
+            transform: translateX(-50%) translateY(80px);
+            background: var(--brown-dark);
+            color: #fff;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-size: 0.9rem;
+            font-weight: 600;
+            z-index: 999;
+            transition: transform 0.3s ease, opacity 0.3s;
+            opacity: 0;
+            white-space: nowrap;
+            max-width: 90vw;
+        }
+        #toast.show { transform: translateX(-50%) translateY(0); opacity: 1; }
+        #toast.success { background: #2E7D32; }
+        #toast.error   { background: #C0392B; }
+
+        /* ── Registered devices table ── */
+        .section-title {
+            font-size: 1rem;
+            font-weight: 700;
+            color: var(--brown-dark);
+            margin: 36px 0 14px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .device-table-wrap {
+            border: 1.5px solid var(--gold);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        .device-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.85rem;
+        }
+
+        .device-table th {
+            background: var(--bg-navbar);
+            border-bottom: 1.5px solid var(--gold);
+            padding: 10px 12px;
+            text-align: left;
+            font-weight: 700;
+            color: var(--brown-dark);
+            white-space: nowrap;
+        }
+
+        .device-table td {
+            padding: 10px 12px;
+            border-bottom: 1px solid #E8C84B33;
+            vertical-align: middle;
+        }
+
+        .device-table tr:last-child td { border-bottom: none; }
+        .device-table tr:nth-child(even) td { background: #FFFDF0; }
+
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 0.78rem;
+            font-weight: 600;
+        }
+        .badge-green  { background: #E8F5E9; color: #2E7D32; }
+        .badge-grey   { background: #F5F5F5; color: #757575; }
+        .badge-yellow { background: #FFFDE7; color: #F9A825; border: 1px solid #F9A825; }
+
+        .mac-code {
+            font-family: 'Courier New', monospace;
+            font-size: 0.82rem;
+            color: var(--brown);
+        }
+
+        .action-btn {
+            background: none;
+            border: none;
+            cursor: pointer;
+            padding: 4px 6px;
+            border-radius: 4px;
+            font-size: 0.9rem;
+            color: var(--brown-mute);
+            transition: background 0.1s, color 0.1s;
+        }
+        .action-btn:hover { background: rgba(0,0,0,0.06); color: var(--brown-dark); }
+        .action-btn.del { color: #E57373; }
+        .action-btn.del:hover { background: #FDE8E8; color: #C0392B; }
+
+        .empty-row td {
+            text-align: center;
+            padding: 24px;
+            color: var(--brown-mute);
+            font-style: italic;
+        }
+
+        /* ── Responsive ── */
+        @media (max-width: 640px) {
+            .device-row {
+                grid-template-columns: 1fr 1fr;
+                grid-template-rows: auto auto auto;
+            }
+            .device-row .field-group:nth-child(3),
+            .device-row .field-group:nth-child(4) { grid-column: auto; }
+            .btn-remove { grid-row: 1; grid-column: 2; justify-self: end; align-self: flex-start; margin-top: 0; }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- ── Navbar ── -->
+    <nav class="ss-navbar">
+        <div class="nav-left">
+            <button class="nav-back" onclick="window.location.href='index.html'" title="กลับหน้าหลัก">
+                <i class="bi bi-arrow-left"></i>
+            </button>
+            <span class="ss-brand">Senses Scale</span>
+        </div>
+        <button class="nav-logout" onclick="logout()" title="ออกจากระบบ">
+            <i class="bi bi-box-arrow-right"></i>
+        </button>
+    </nav>
+
+    <!-- ── Main ── -->
+    <div class="page-wrap">
+
+        <div class="page-title">Add Device(s)</div>
+
+        <!-- Device input rows -->
+        <div id="deviceRows"></div>
+
+        <hr class="divider">
+
+        <div class="btn-row">
+            <button class="btn-add-device" onclick="addRow()">
+                <i class="bi bi-plus-lg"></i> Add Device
+            </button>
+            <button class="btn-register" id="btnRegister" onclick="registerAll()">
+                Register
+            </button>
+        </div>
+
+        <!-- Registered Devices Table -->
+        <div class="section-title">
+            <i class="bi bi-cpu-fill"></i> อุปกรณ์ที่ลงทะเบียนแล้ว
+        </div>
+        <div class="device-table-wrap">
+            <table class="device-table">
+                <thead>
+                    <tr>
+                        <th>MAC Address</th>
+                        <th>Device Name</th>
+                        <th>แผนก</th>
+                        <th>Offset (kg)</th>
+                        <th>Last Seen</th>
+                        <th>สถานะ</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody id="deviceTableBody">
+                    <tr class="empty-row"><td colspan="7">กำลังโหลด...</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+    </div>
+
+    <div id="toast"></div>
+
+    <script>
+        const API = '';
+        let _bins = [];     // { bin_id, bin_code, location }
+        let _rowCount = 0;
+
+        // ── Auth guard ──────────────────────────────────────────────
+        const token = sessionStorage.getItem('ss_token');
+        if (!token) window.location.replace('login.html');
+
+        function authHeaders() {
+            return { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` };
+        }
+
+        function logout() {
+            fetch(`${API}/api/auth/logout`, { method: 'POST', headers: authHeaders() }).catch(() => {});
+            sessionStorage.clear();
+            window.location.replace('login.html');
+        }
+
+        // ── Toast ───────────────────────────────────────────────────
+        let _toastTimer;
+        function showToast(msg, type = '') {
+            const el = document.getElementById('toast');
+            el.textContent = msg;
+            el.className = `show ${type}`;
+            clearTimeout(_toastTimer);
+            _toastTimer = setTimeout(() => { el.className = ''; }, 3500);
+        }
+
+        // ── Load bins ───────────────────────────────────────────────
+        async function loadBins() {
+            try {
+                const res = await fetch(`${API}/api/bins`, { headers: { 'Authorization': `Bearer ${token}` } });
+                const json = await res.json();
+                _bins = (json.data || []).map(b => ({
+                    bin_id:   b.bin_id,
+                    bin_code: b.bin_code,
+                    location: b.location
+                }));
+            } catch(e) {
+                console.error('loadBins error', e);
+            }
+        }
+
+        // ── Build department <select> options ───────────────────────
+        function buildGroupOptions(selectedBinId = '') {
+            return _bins.map(b => {
+                const sel = (String(b.bin_id) === String(selectedBinId)) ? ' selected' : '';
+                return `<option value="${b.bin_id}"${sel}>${b.bin_code} — ${b.location}</option>`;
+            }).join('');
+        }
+
+        // ── Add input row ────────────────────────────────────────────
+        function addRow(mac = '', name = '', binId = '', offset = '') {
+            _rowCount++;
+            const id = _rowCount;
+            const row = document.createElement('div');
+            row.className = 'device-row';
+            row.id = `row-${id}`;
+            row.innerHTML = `
+                <div class="field-group">
+                    <label class="field-label">Mac Address</label>
+                    <input class="ss-input" id="mac-${id}" type="text"
+                        placeholder="AA:BB:CC:DD:EE:FF" maxlength="17"
+                        value="${mac}" oninput="formatMac(this)" autocomplete="off">
+                </div>
+                <div class="field-group">
+                    <label class="field-label">Device Name</label>
+                    <input class="ss-input" id="name-${id}" type="text"
+                        placeholder="เช่น Scale-OT-01" maxlength="80"
+                        value="${name}">
+                </div>
+                <div class="field-group">
+                    <label class="field-label">Groups</label>
+                    <select class="ss-select" id="bin-${id}">
+                        <option value="">-- เลือกแผนก --</option>
+                        ${buildGroupOptions(binId)}
+                    </select>
+                </div>
+                <div class="field-group">
+                    <label class="field-label">Weight Offset</label>
+                    <input class="ss-input" id="offset-${id}" type="number"
+                        step="0.01" placeholder="0.00" value="${offset}">
+                </div>
+                <button class="btn-remove" onclick="removeRow(${id})" title="ลบ">
+                    <i class="bi bi-x-lg"></i>
+                </button>
+            `;
+            document.getElementById('deviceRows').appendChild(row);
+        }
+
+        function removeRow(id) {
+            const el = document.getElementById(`row-${id}`);
+            if (el) el.remove();
+        }
+
+        // ── Auto-format MAC as user types ────────────────────────────
+        function formatMac(input) {
+            let v = input.value.replace(/[^0-9A-Fa-f]/g, '').toUpperCase();
+            let out = '';
+            for (let i = 0; i < v.length && i < 12; i++) {
+                if (i > 0 && i % 2 === 0) out += ':';
+                out += v[i];
+            }
+            input.value = out;
+        }
+
+        // ── Collect rows and POST to API ─────────────────────────────
+        async function registerAll() {
+            const rows = document.querySelectorAll('.device-row');
+            if (!rows.length) { showToast('กรุณาเพิ่มอุปกรณ์อย่างน้อย 1 รายการ', 'error'); return; }
+
+            const devices = [];
+            let valid = true;
+
+            rows.forEach(row => {
+                const id = row.id.split('-')[1];
+                const macEl    = document.getElementById(`mac-${id}`);
+                const nameEl   = document.getElementById(`name-${id}`);
+                const binEl    = document.getElementById(`bin-${id}`);
+                const offsetEl = document.getElementById(`offset-${id}`);
+
+                const mac    = (macEl.value   || '').trim().toUpperCase();
+                const name   = (nameEl.value  || '').trim();
+                const bin_id = parseInt(binEl.value) || 0;
+                const offset = parseFloat(offsetEl.value) || 0;
+
+                // Validate
+                macEl.classList.remove('error');
+                binEl.classList.remove('error');
+
+                if (!/^([0-9A-F]{2}:){5}[0-9A-F]{2}$/.test(mac)) {
+                    macEl.classList.add('error');
+                    valid = false;
+                }
+                if (!bin_id) {
+                    binEl.classList.add('error');
+                    valid = false;
+                }
+
+                if (mac && bin_id) {
+                    devices.push({ mac_address: mac, device_name: name || mac, bin_id, weight_offset: offset });
+                }
+            });
+
+            if (!valid) { showToast('กรุณากรอก MAC Address และเลือกแผนกให้ครบ', 'error'); return; }
+            if (!devices.length) return;
+
+            const btn = document.getElementById('btnRegister');
+            btn.disabled = true;
+            btn.textContent = 'กำลังลงทะเบียน...';
+
+            try {
+                const res = await fetch(`${API}/api/devices/register`, {
+                    method: 'POST',
+                    headers: authHeaders(),
+                    body: JSON.stringify({ devices })
+                });
+                const json = await res.json();
+
+                if (res.ok && json.success) {
+                    const errCount = (json.errors || []).length;
+                    const msg = errCount > 0
+                        ? `ลงทะเบียน ${json.registered} รายการ (${errCount} รายการล้มเหลว)`
+                        : `ลงทะเบียนสำเร็จ ${json.registered} รายการ`;
+                    showToast(msg, errCount ? '' : 'success');
+                    // Clear rows
+                    document.getElementById('deviceRows').innerHTML = '';
+                    _rowCount = 0;
+                    loadRegistered();
+                } else {
+                    showToast(json.detail || 'เกิดข้อผิดพลาด', 'error');
+                }
+            } catch(e) {
+                console.error(e);
+                showToast('ไม่สามารถเชื่อมต่อ server', 'error');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Register';
+            }
+        }
+
+        // ── Load registered devices table ───────────────────────────
+        async function loadRegistered() {
+            const tbody = document.getElementById('deviceTableBody');
+            tbody.innerHTML = '<tr class="empty-row"><td colspan="7">กำลังโหลด...</td></tr>';
+
+            try {
+                const res  = await fetch(`${API}/api/devices`);
+                const json = await res.json();
+
+                const rows = (json.data || []).filter(d => d.mac_address);
+                if (!rows.length) {
+                    tbody.innerHTML = '<tr class="empty-row"><td colspan="7">ยังไม่มีอุปกรณ์ที่ลงทะเบียน</td></tr>';
+                    return;
+                }
+
+                tbody.innerHTML = rows.map(d => {
+                    const lastSeen = d.last_seen ? relativeTime(d.last_seen) : '—';
+                    const isOnline = d.last_seen && (Date.now() - new Date(d.last_seen).getTime() < 5 * 60 * 1000);
+                    const badge = isOnline
+                        ? `<span class="badge badge-green"><i class="bi bi-circle-fill" style="font-size:0.55rem"></i> Online</span>`
+                        : `<span class="badge badge-grey">Offline</span>`;
+                    const offset = d.weight_offset != null ? Number(d.weight_offset).toFixed(2) : '0.00';
+                    return `<tr>
+                        <td><span class="mac-code">${d.mac_address || '—'}</span></td>
+                        <td>${escHtml(d.device_name || d.sensor_code || '—')}</td>
+                        <td><strong>${d.bin_code || '—'}</strong></td>
+                        <td>${offset}</td>
+                        <td style="font-size:0.8rem;color:var(--brown-mute)">${lastSeen}</td>
+                        <td>${badge}</td>
+                        <td style="white-space:nowrap">
+                            <button class="action-btn" onclick="editDevice(${d.sensor_id})" title="แก้ไข">
+                                <i class="bi bi-pencil-fill"></i>
+                            </button>
+                            <button class="action-btn del" onclick="deleteDevice(${d.sensor_id},'${escHtml(d.mac_address || '')}')" title="ยกเลิกการลงทะเบียน">
+                                <i class="bi bi-trash3-fill"></i>
+                            </button>
+                        </td>
+                    </tr>`;
+                }).join('');
+
+            } catch(e) {
+                tbody.innerHTML = '<tr class="empty-row"><td colspan="7">โหลดข้อมูลไม่สำเร็จ</td></tr>';
+            }
+        }
+
+        // ── Edit — pre-fill a new row ────────────────────────────────
+        async function editDevice(sensorId) {
+            try {
+                const res  = await fetch(`${API}/api/devices`);
+                const json = await res.json();
+                const d = (json.data || []).find(x => x.sensor_id === sensorId);
+                if (!d) return;
+
+                // Delete from DB first, then prefill form
+                const yes = confirm(`แก้ไขอุปกรณ์ ${d.mac_address}?\nข้อมูลจะถูกแก้ไขหลังกด Register`);
+                if (!yes) return;
+
+                addRow(d.mac_address || '', d.device_name || d.sensor_code || '', d.bin_id, d.weight_offset || 0);
+                document.getElementById('deviceRows').lastElementChild.scrollIntoView({ behavior: 'smooth' });
+
+                await deleteDevice(sensorId, d.mac_address, true /* silent */);
+                loadRegistered();
+            } catch(e) {
+                showToast('เกิดข้อผิดพลาด', 'error');
+            }
+        }
+
+        // ── Delete ───────────────────────────────────────────────────
+        async function deleteDevice(sensorId, mac, silent = false) {
+            if (!silent && !confirm(`ยกเลิกการลงทะเบียน ${mac} ใช่หรือไม่?`)) return;
+
+            try {
+                const res  = await fetch(`${API}/api/devices/${sensorId}`, {
+                    method: 'DELETE',
+                    headers: authHeaders()
+                });
+                const json = await res.json();
+                if (res.ok && json.success) {
+                    if (!silent) { showToast(json.message, 'success'); loadRegistered(); }
+                } else {
+                    if (!silent) showToast(json.detail || 'เกิดข้อผิดพลาด', 'error');
+                }
+            } catch(e) {
+                if (!silent) showToast('เชื่อมต่อ server ไม่ได้', 'error');
+            }
+        }
+
+        // ── Helpers ─────────────────────────────────────────────────
+        function escHtml(s) {
+            return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+        }
+
+        function relativeTime(iso) {
+            const diff = Date.now() - new Date(iso).getTime();
+            const m = Math.floor(diff / 60000);
+            if (m < 1)   return 'เมื่อสักครู่';
+            if (m < 60)  return `${m} นาทีที่แล้ว`;
+            const h = Math.floor(m / 60);
+            if (h < 24)  return `${h} ชม.ที่แล้ว`;
+            return `${Math.floor(h/24)} วันที่แล้ว`;
+        }
+
+        // ── Init ─────────────────────────────────────────────────────
+        (async () => {
+            await loadBins();
+            addRow();          // Start with one empty row
+            loadRegistered();
+        })();
+    </script>
+
+</body>
+</html>

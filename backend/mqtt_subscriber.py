@@ -68,18 +68,45 @@ class DatabaseManager:
     def insert_sensor_reading(self, data: Dict[str, Any]) -> bool:
         """Insert sensor reading into database"""
         try:
-            # Get sensor_id from sensor_code
-            self.cursor.execute(
-                "SELECT sensor_id FROM sensors WHERE sensor_code = %s",
-                (data.get('sensor_code'),)
-            )
-            sensor_result = self.cursor.fetchone()
+            sensor_result = None
+            weight_offset = 0.0
+
+            # 1. Try MAC address lookup first (registered device)
+            mac = data.get('mac_address', '').strip().upper()
+            if mac:
+                self.cursor.execute(
+                    "SELECT sensor_id, bin_id, weight_offset FROM sensors WHERE mac_address = %s",
+                    (mac,)
+                )
+                sensor_result = self.cursor.fetchone()
+                if sensor_result:
+                    weight_offset = float(sensor_result.get('weight_offset') or 0.0)
+                    # Override bin_id from registration (ignore payload's bin_id)
+                    data = dict(data)
+                    data['bin_id'] = str(sensor_result['bin_id'])
+                    logger.debug(f"🔍 MAC match: {mac} → sensor_id={sensor_result['sensor_id']}")
+
+            # 2. Fall back to sensor_code lookup
+            if not sensor_result:
+                self.cursor.execute(
+                    "SELECT sensor_id, weight_offset FROM sensors WHERE sensor_code = %s",
+                    (data.get('sensor_code'),)
+                )
+                sensor_result = self.cursor.fetchone()
+                if sensor_result:
+                    weight_offset = float(sensor_result.get('weight_offset') or 0.0)
 
             if not sensor_result:
-                logger.warning(f"⚠️  Sensor {data.get('sensor_code')} not found in database")
+                logger.warning(f"⚠️  Unknown device — MAC={mac or 'N/A'}, sensor_code={data.get('sensor_code', 'N/A')}")
                 return False
 
             sensor_id = sensor_result['sensor_id']
+
+            # Apply weight offset calibration
+            raw_weight = data.get('weight_kg')
+            if raw_weight is not None and weight_offset != 0.0:
+                data = dict(data)
+                data['weight_kg'] = float(raw_weight) + weight_offset
 
             # Insert reading
             insert_query = """

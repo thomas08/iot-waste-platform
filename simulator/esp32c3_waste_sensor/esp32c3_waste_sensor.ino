@@ -2,9 +2,9 @@
  * ESP32-C3 — Multi-Department Waste Bin Test
  * ส่งข้อมูลครบทุก 10 แผนกเพื่อทดสอบ IoT Platform
  * Library required: WebSockets by Markus Sattler (links2004)
- * Version: 2.0
+ * Version: 2.1 — ส่ง mac_address ใน payload สำหรับ Device Registration
  */
-#define FW_VERSION "2.0"
+#define FW_VERSION "2.1"
 
 #include <WiFi.h>
 #include <time.h>
@@ -145,14 +145,18 @@ void publishBin(int idx) {
   char ts[32] = "1970-01-01T00:00:00+07:00";
   if (getLocalTime(&t)) strftime(ts, sizeof(ts), "%Y-%m-%dT%H:%M:%S+07:00", &t);
 
-  char msg[512];
+  // Get MAC address for device registration
+  String macStr = WiFi.macAddress();
+
+  char msg[600];
   snprintf(msg, sizeof(msg),
     "{\"bin_id\":\"%s\",\"bin_code\":\"%s\","
     "\"sensor_code\":\"%s\","
+    "\"mac_address\":\"%s\","
     "\"fill_level\":%.1f,\"weight_kg\":%.1f,"
     "\"temperature_c\":%.1f,\"battery_level\":85,"
     "\"signal_strength\":-65,\"timestamp\":\"%s\"}",
-    b.bin_id, b.bin_code, b.sensor_code,
+    b.bin_id, b.bin_code, b.sensor_code, macStr.c_str(),
     b.fill_level, b.weight_kg, b.temperature_c, ts);
 
   uint8_t pkt[600];
