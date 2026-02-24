@@ -639,6 +639,43 @@ def _normalize_mac(mac: str) -> str:
     return mac
 
 
+@app.get("/api/devices/lookup")
+async def lookup_device(mac: str = Query(..., description="MAC address AA:BB:CC:DD:EE:FF")):
+    """Called by ESP32 on boot to find which department it is assigned to."""
+    mac = mac.strip().upper()
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
+        cursor.execute("""
+            SELECT s.sensor_id, s.sensor_code, s.weight_offset,
+                   s.bin_id, wb.bin_code, wb.location
+            FROM sensors s
+            JOIN waste_bins wb ON s.bin_id = wb.bin_id
+            WHERE s.mac_address = %s AND s.status = 'active'
+        """, (mac,))
+        row = cursor.fetchone()
+        cursor.close()
+        conn.close()
+
+        if not row:
+            logger.info(f"Device lookup: MAC {mac} not registered")
+            return {"registered": False}
+
+        logger.info(f"Device lookup: MAC {mac} → {row['bin_code']}")
+        return {
+            "registered":    True,
+            "sensor_id":     row["sensor_id"],
+            "sensor_code":   row["sensor_code"],
+            "bin_id":        str(row["bin_id"]),
+            "bin_code":      row["bin_code"],
+            "location":      row["location"],
+            "weight_offset": float(row["weight_offset"] or 0.0),
+        }
+    except Exception as e:
+        logger.error(f"Device lookup error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/devices")
 async def get_devices():
     """List all registered devices with bin/department info."""
