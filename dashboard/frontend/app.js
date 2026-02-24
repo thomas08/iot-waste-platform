@@ -1,351 +1,587 @@
-// IoT Waste Management Dashboard - JavaScript
+// ระบบชั่งน้ำหนักขยะติดเชื้อ — Senses Scale Dashboard
+// Status logic: กำลังชั่ง | ยอดแล้ว | ยังไม่ยอด 24ชม. | ไม่ยอดเกิน 48ชม.
 
-// Configuration
-const API_BASE_URL = 'http://localhost:8000/api';
-const REFRESH_INTERVAL = 10000; // 10 seconds
+const API_BASE_URL     = '/api';
+const REFRESH_INTERVAL = 15000; // 15 sec
 
-// Global variables
+// ── Auth guard ────────────────────────────────────────
+const SS_TOKEN = sessionStorage.getItem('ss_token');
+if (!SS_TOKEN) {
+    window.location.replace('login.html');
+}
+
+function logout() {
+    fetch(`/api/auth/logout`, {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + SS_TOKEN }
+    }).catch(() => {});
+    sessionStorage.clear();
+    window.location.replace('login.html');
+}
+
 let fillLevelChart = null;
 let statusPieChart = null;
-let refreshTimer = null;
+let refreshTimer   = null;
 
-// Initialize dashboard
-document.addEventListener('DOMContentLoaded', function() {
-    console.log('Dashboard initializing...');
-    initializeCharts();
-    loadDashboardData();
-    startAutoRefresh();
+// Panel state
+let chartsVisible  = false;
+let alertsVisible  = false;
+let filterVisible  = false;
+
+// Data cache
+let binsCache      = [];
+let dailyCache     = [];   // from /api/stats/daily-weight
+let alertsCache    = [];
+let currentFilter  = 'all';
+let exportType     = 'csv';
+
+/* ────────────────────────────────────────────────────
+   Init
+   ──────────────────────────────────────────────────── */
+
+document.addEventListener('DOMContentLoaded', () => {
+    const today = new Date().toISOString().split('T')[0];
+    document.getElementById('exportStartDate').value = today;
+    document.getElementById('exportEndDate').value   = today;
+
+    // Show logged-in username in navbar
+    const displayName = sessionStorage.getItem('ss_display_name') ||
+                        sessionStorage.getItem('ss_username') || '';
+    const navEl = document.getElementById('navUsername');
+    if (navEl && displayName) navEl.textContent = displayName;
+
+    initCharts();
+    loadAll();
+    refreshTimer = setInterval(loadAll, REFRESH_INTERVAL);
 });
 
-// Initialize charts
-function initializeCharts() {
-    // Fill Level Timeline Chart
-    const fillCtx = document.getElementById('fillLevelChart').getContext('2d');
-    fillLevelChart = new Chart(fillCtx, {
-        type: 'line',
-        data: {
-            labels: [],
-            datasets: [{
-                label: 'Average Fill Level (%)',
-                data: [],
-                borderColor: '#198754',
-                backgroundColor: 'rgba(25, 135, 84, 0.1)',
-                borderWidth: 2,
-                tension: 0.4,
-                fill: true
-            }]
-        },
+window.addEventListener('beforeunload', () => clearInterval(refreshTimer));
+
+/* ────────────────────────────────────────────────────
+   Panel toggles
+   ──────────────────────────────────────────────────── */
+
+function toggleFilter() {
+    filterVisible = !filterVisible;
+    document.getElementById('filterPanel').classList.toggle('ss-hidden', !filterVisible);
+    document.getElementById('btnFilter').classList.toggle('active', filterVisible);
+}
+
+function toggleCharts() {
+    chartsVisible = !chartsVisible;
+    document.getElementById('chartsPanel').classList.toggle('ss-hidden', !chartsVisible);
+    document.getElementById('btnChart').classList.toggle('active', chartsVisible);
+    if (chartsVisible) updateBarChart(binsCache);
+}
+
+function toggleAlerts() {
+    alertsVisible = !alertsVisible;
+    document.getElementById('alertsPanel').classList.toggle('ss-hidden', !alertsVisible);
+    document.getElementById('overlayBg').classList.toggle('ss-hidden', !alertsVisible);
+}
+
+function closeAllPanels() {
+    alertsVisible = false;
+    document.getElementById('alertsPanel').classList.add('ss-hidden');
+    document.getElementById('overlayBg').classList.add('ss-hidden');
+}
+
+/* ────────────────────────────────────────────────────
+   Filter
+   ──────────────────────────────────────────────────── */
+
+function setFilter(status) {
+    currentFilter = status;
+    document.querySelectorAll('.ss-filter-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.status === status);
+    });
+    renderBins(binsCache);
+}
+
+/* ────────────────────────────────────────────────────
+   Export CSV / Xlsx Modal
+   ──────────────────────────────────────────────────── */
+
+function showExportModal(type) {
+    exportType = type;
+    document.getElementById('exportTitle').textContent =
+        type === 'csv' ? 'Export to CSV' : 'Export to Xlsx Report';
+    document.getElementById('exportDoBtn').textContent = 'Export';
+    document.getElementById('exportModal').classList.remove('ss-hidden');
+    document.getElementById('overlayModal').classList.remove('ss-hidden');
+}
+
+function closeExport() {
+    document.getElementById('exportModal').classList.add('ss-hidden');
+    document.getElementById('overlayModal').classList.add('ss-hidden');
+}
+
+async function doExport() {
+    const startDate = document.getElementById('exportStartDate').value;
+    const startTime = document.getElementById('exportStartTime').value;
+    const endDate   = document.getElementById('exportEndDate').value;
+    const endTime   = document.getElementById('exportEndTime').value;
+
+    if (!startDate || !endDate) { alert('กรุณาเลือกช่วงวันที่'); return; }
+
+    const startDt = new Date(`${startDate}T${startTime || '00:00'}`);
+    const endDt   = new Date(`${endDate}T${endTime || '23:59'}`);
+    if (endDt <= startDt) { alert('วันที่สิ้นสุดต้องหลังวันที่เริ่มต้น'); return; }
+
+    const hours = Math.max(1, Math.ceil((endDt - startDt) / (1000 * 60 * 60)));
+
+    const btn = document.getElementById('exportDoBtn');
+    btn.textContent = 'กำลังโหลด...';
+    btn.disabled    = true;
+
+    try {
+        const res    = await fetch(`${API_BASE_URL}/readings?hours=${Math.min(hours, 720)}`);
+        const result = await res.json();
+
+        if (!result.success || !result.data?.length) {
+            alert('ไม่พบข้อมูลในช่วงเวลาที่เลือก'); return;
+        }
+
+        const rows = result.data.filter(r => {
+            const t = new Date(r.timestamp);
+            return t >= startDt && t <= endDt;
+        });
+
+        if (!rows.length) { alert('ไม่พบข้อมูลในช่วงเวลาที่เลือก'); return; }
+
+        // Enrich rows with location from binsCache
+        const binMap = {};
+        binsCache.forEach(b => { binMap[b.bin_id] = b.location; });
+        rows.forEach(r => { r.department = binMap[r.bin_id] || r.bin_code; });
+
+        const filename = `infectious_waste_${startDate}_${endDate}`;
+        exportType === 'xlsx' ? downloadXlsx(rows, filename) : downloadCsv(rows, filename);
+        closeExport();
+    } catch (e) {
+        console.error(e);
+        alert('เกิดข้อผิดพลาดในการดึงข้อมูล');
+    } finally {
+        btn.textContent = 'Export';
+        btn.disabled    = false;
+    }
+}
+
+function downloadCsv(rows, filename) {
+    const headers = ['timestamp', 'bin_code', 'department', 'weight_kg',
+                     'battery_level', 'signal_strength', 'temperature_c'];
+    const thHeaders = ['วันที่/เวลา', 'รหัสเครื่อง', 'หน่วยงาน', 'น้ำหนัก (กก.)',
+                       'แบตเตอรี่ (%)', 'สัญญาณ (dBm)', 'อุณหภูมิ (°C)'];
+    const lines = [
+        thHeaders.join(','),
+        ...rows.map(r => headers.map(h => {
+            const v = r[h] ?? '';
+            return typeof v === 'string' && v.includes(',') ? `"${v}"` : v;
+        }).join(','))
+    ];
+    const blob = new Blob(['\uFEFF' + lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+    triggerDownload(blob, `${filename}.csv`);
+}
+
+function downloadXlsx(rows, filename) {
+    const headers   = ['timestamp', 'bin_code', 'department', 'weight_kg',
+                       'battery_level', 'signal_strength', 'temperature_c'];
+    const thHeaders = ['วันที่/เวลา', 'รหัสเครื่อง', 'หน่วยงาน', 'น้ำหนัก (กก.)',
+                       'แบตเตอรี่ (%)', 'สัญญาณ (dBm)', 'อุณหภูมิ (°C)'];
+    const wsData = [
+        thHeaders,
+        ...rows.map(r => headers.map(h => r[h] ?? ''))
+    ];
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet(wsData);
+    // Column widths
+    ws['!cols'] = [{ wch: 22 }, { wch: 10 }, { wch: 35 }, { wch: 14 },
+                   { wch: 14 }, { wch: 14 }, { wch: 14 }];
+    XLSX.utils.book_append_sheet(wb, ws, 'ขยะติดเชื้อ');
+    XLSX.writeFile(wb, `${filename}.xlsx`);
+}
+
+function triggerDownload(blob, name) {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    a.click();
+    URL.revokeObjectURL(a.href);
+}
+
+/* ────────────────────────────────────────────────────
+   Detail Modal
+   ──────────────────────────────────────────────────── */
+
+async function openModal(binId) {
+    const bin = binsCache.find(b => b.bin_id === binId);
+    if (!bin) return;
+
+    const cs    = cardStatus(bin);
+    const daily = dailyCache.find(d => d.bin_id === binId);
+
+    document.getElementById('modalTitle').textContent = bin.location;
+    document.getElementById('modalBody').innerHTML = buildModalBody(bin, cs, daily, null);
+    document.getElementById('detailModal').classList.remove('ss-hidden');
+    document.getElementById('overlayModal').classList.remove('ss-hidden');
+
+    // Load weighing history async
+    try {
+        const r = await fetch(`${API_BASE_URL}/bins/${binId}`);
+        const detail = await r.json();
+        if (detail.success && document.getElementById('detailModal').classList.contains('ss-hidden') === false) {
+            document.getElementById('modalBody').innerHTML =
+                buildModalBody(bin, cs, daily, detail.data.recent_readings);
+        }
+    } catch(e) { console.warn('Modal history load error:', e); }
+}
+
+function buildModalBody(bin, cs, daily, readings) {
+    const todayKg  = daily ? parseFloat(daily.total_weight_today) : 0;
+    const todayCnt = daily ? parseInt(daily.reading_count_today)  : 0;
+    const lastKg   = bin.weight_kg != null ? parseFloat(bin.weight_kg) : null;
+    const batt     = bin.battery_level != null ? parseFloat(bin.battery_level).toFixed(0) + '%' : '--';
+    const signal   = bin.signal_strength != null ? bin.signal_strength + ' dBm' : '--';
+
+    // Summary strip
+    const summaryHtml = `
+        <div class="ss-modal-summary">
+            <div class="ss-modal-summary-item">
+                <div class="ss-modal-summary-num">${todayKg.toFixed(3)}</div>
+                <div class="ss-modal-summary-lbl">น้ำหนักสะสม (กก.)</div>
+            </div>
+            <div class="ss-modal-summary-item">
+                <div class="ss-modal-summary-num">${todayCnt}</div>
+                <div class="ss-modal-summary-lbl">ครั้ง (24ชม.)</div>
+            </div>
+            <div class="ss-modal-summary-item">
+                <div class="ss-modal-summary-num">${batt}</div>
+                <div class="ss-modal-summary-lbl">แบตเตอรี่</div>
+            </div>
+            <div class="ss-modal-summary-item">
+                <div class="ss-modal-summary-num" style="font-size:0.95rem">${signal}</div>
+                <div class="ss-modal-summary-lbl">สัญญาณ</div>
+            </div>
+        </div>`;
+
+    // Info row: device code + status badge
+    const infoHtml = `
+        <div class="ss-modal-row">
+            <span class="ss-modal-label">รหัสเครื่อง</span>
+            <span class="ss-modal-value">${bin.bin_code}</span>
+        </div>
+        <div class="ss-modal-row" style="margin-bottom:4px">
+            <span class="ss-modal-label">สถานะ</span>
+            <span class="ss-modal-status-badge status-${cs}" style="width:auto;padding:3px 12px;margin:0">
+                ${STATUS_TH[cs] ?? cs}
+            </span>
+        </div>`;
+
+    // Weighing history
+    let historyHtml = '<div class="ss-history-header"><i class="bi bi-list-ul"></i> ประวัติการชั่ง (ล่าสุด 10 ครั้ง)</div>';
+    if (readings === null) {
+        historyHtml += '<div class="ss-history-empty"><i class="bi bi-hourglass-split"></i> กำลังโหลด...</div>';
+    } else {
+        const weighings = readings.filter(r => r.weight_kg > 0);
+        if (weighings.length === 0) {
+            historyHtml += '<div class="ss-history-empty">ไม่มีข้อมูลการชั่งน้ำหนัก</div>';
+        } else {
+            historyHtml += '<div class="ss-history-list">' + weighings.map((r, i) => {
+                const t = new Date(r.timestamp).toLocaleString('th-TH', {
+                    day: '2-digit', month: '2-digit',
+                    hour: '2-digit', minute: '2-digit', second: '2-digit'
+                });
+                const wt = parseFloat(r.weight_kg).toFixed(3) + ' กก.';
+                return `<div class="ss-history-row">
+                    <span class="ss-history-time">${i === 0 ? '🟢 ' : ''}${t}</span>
+                    <span class="ss-history-weight">${wt}</span>
+                </div>`;
+            }).join('') + '</div>';
+        }
+    }
+
+    return summaryHtml + infoHtml + historyHtml;
+}
+
+function closeModal() {
+    document.getElementById('detailModal').classList.add('ss-hidden');
+    document.getElementById('exportModal').classList.add('ss-hidden');
+    document.getElementById('overlayModal').classList.add('ss-hidden');
+}
+
+/* ────────────────────────────────────────────────────
+   Charts init
+   ──────────────────────────────────────────────────── */
+
+function initCharts() {
+    // Left: Bar chart — weight per department today
+    fillLevelChart = new Chart(
+        document.getElementById('fillLevelChart').getContext('2d'), {
+        type: 'bar',
+        data: { labels: [], datasets: [{
+            label: 'น้ำหนักวันนี้ (กก.)',
+            data: [],
+            backgroundColor: 'rgba(168,216,176,0.7)',
+            borderColor: '#1B6B42',
+            borderWidth: 1.5,
+            borderRadius: 4
+        }] },
         options: {
             responsive: true,
             maintainAspectRatio: true,
-            plugins: {
-                legend: {
-                    display: true,
-                    position: 'top'
-                }
-            },
+            plugins: { legend: { display: false } },
             scales: {
                 y: {
                     beginAtZero: true,
-                    max: 100,
-                    ticks: {
-                        callback: function(value) {
-                            return value + '%';
-                        }
-                    }
+                    ticks: { callback: v => v + ' กก.' },
+                    grid: { color: 'rgba(232,200,75,0.2)' }
+                },
+                x: {
+                    grid: { display: false },
+                    ticks: { font: { size: 10 }, maxRotation: 45 }
                 }
             }
         }
     });
 
-    // Status Pie Chart
-    const pieCtx = document.getElementById('statusPieChart').getContext('2d');
-    statusPieChart = new Chart(pieCtx, {
+    // Right: Doughnut — status distribution
+    statusPieChart = new Chart(
+        document.getElementById('statusPieChart').getContext('2d'), {
         type: 'doughnut',
         data: {
-            labels: ['Low', 'Medium', 'High', 'Critical'],
+            labels: ['กำลังชั่ง', 'ยอดแล้ววันนี้', 'ยังไม่ยอด 24ชม.', 'ไม่ยอดเกิน 48ชม.', 'ไม่มีข้อมูล'],
             datasets: [{
-                data: [0, 0, 0, 0],
-                backgroundColor: [
-                    '#198754', // success
-                    '#0dcaf0', // info
-                    '#ffc107', // warning
-                    '#dc3545'  // danger
-                ],
-                borderWidth: 2,
-                borderColor: '#fff'
+                data: [0, 0, 0, 0, 0],
+                backgroundColor: ['#A8D8B0', '#FFF3C4', '#F5B7C0', '#C9D5E0', '#C4BAD0'],
+                borderColor:     ['#7EC89A', '#E8C84B', '#E8939E', '#A9BDD0', '#A89DBE'],
+                borderWidth: 2
             }]
         },
         options: {
             responsive: true,
             maintainAspectRatio: true,
-            plugins: {
-                legend: {
-                    position: 'bottom'
-                }
-            }
+            plugins: { legend: { position: 'bottom', labels: { font: { size: 11 } } } }
         }
     });
 }
 
-// Load all dashboard data
-async function loadDashboardData() {
+/* ────────────────────────────────────────────────────
+   Data loading
+   ──────────────────────────────────────────────────── */
+
+async function loadAll() {
     try {
-        await Promise.all([
-            loadStatistics(),
-            loadBins(),
-            loadAlerts(),
-            loadTimelineData()
-        ]);
-        updateLastUpdateTime();
-    } catch (error) {
-        console.error('Error loading dashboard data:', error);
-        showError('Failed to load dashboard data');
-    }
+        await Promise.all([loadBins(), loadDailyWeight(), loadAlerts()]);
+        updateTime();
+    } catch (e) { console.error('loadAll error:', e); }
 }
 
-// Load statistics
-async function loadStatistics() {
-    try {
-        const response = await fetch(`${API_BASE_URL}/stats`);
-        const result = await response.json();
-
-        if (result.success) {
-            const data = result.data;
-
-            document.getElementById('totalBins').textContent = data.total_bins || 0;
-            document.getElementById('activeAlerts').textContent = data.active_alerts || 0;
-            document.getElementById('binsNeedAttention').textContent = data.bins_need_attention || 0;
-            document.getElementById('avgFillLevel').textContent = (data.avg_fill_level || 0) + '%';
-
-            // Update pie chart
-            updateStatusPieChart(data.fill_status_distribution);
-        }
-    } catch (error) {
-        console.error('Error loading statistics:', error);
-    }
-}
-
-// Update status pie chart
-function updateStatusPieChart(distribution) {
-    const statusMap = { low: 0, medium: 1, high: 2, critical: 3 };
-    const data = [0, 0, 0, 0];
-
-    distribution.forEach(item => {
-        const index = statusMap[item.fill_status];
-        if (index !== undefined) {
-            data[index] = item.count;
-        }
-    });
-
-    statusPieChart.data.datasets[0].data = data;
-    statusPieChart.update();
-}
-
-// Load bins
 async function loadBins() {
     try {
-        const response = await fetch(`${API_BASE_URL}/bins`);
-        const result = await response.json();
-
-        if (result.success) {
-            renderBins(result.data);
-        }
-    } catch (error) {
-        console.error('Error loading bins:', error);
+        const r = await fetch(`${API_BASE_URL}/bins`).then(r => r.json());
+        if (!r.success) return;
+        binsCache = r.data;
+        renderBins(r.data);
+    } catch(e) {
+        console.error('loadBins error:', e);
+        document.getElementById('binsGrid').innerHTML =
+            '<div class="ss-empty"><i class="bi bi-exclamation-triangle"></i><p>ไม่สามารถเชื่อมต่อ API ได้</p></div>';
     }
 }
 
-// Render bins grid
-function renderBins(bins) {
-    const container = document.getElementById('binsGrid');
-
-    if (!bins || bins.length === 0) {
-        container.innerHTML = '<div class="empty-state"><i class="bi bi-inbox"></i><p>No bins found</p></div>';
-        return;
-    }
-
-    container.innerHTML = bins.map(bin => {
-        const fillLevel = bin.fill_level || 0;
-        const fillStatus = bin.fill_status || 'low';
-        const temperature = bin.temperature_c || '--';
-        const battery = bin.battery_level || '--';
-
-        let progressColor = 'bg-success';
-        if (fillLevel >= 90) progressColor = 'bg-danger';
-        else if (fillLevel >= 75) progressColor = 'bg-warning';
-        else if (fillLevel >= 50) progressColor = 'bg-info';
-
-        const lastReading = bin.last_reading ? new Date(bin.last_reading).toLocaleString() : 'No data';
-
-        return `
-            <div class="col-md-6">
-                <div class="bin-card status-${fillStatus} fade-in">
-                    <div class="d-flex justify-content-between align-items-start">
-                        <div>
-                            <div class="bin-code">${bin.bin_code}</div>
-                            <div class="bin-location">
-                                <i class="bi bi-geo-alt"></i> ${bin.location}
-                            </div>
-                        </div>
-                        <span class="status-badge ${fillStatus}">${fillStatus}</span>
-                    </div>
-
-                    <div class="progress mt-2">
-                        <div class="progress-bar ${progressColor}" role="progressbar"
-                             style="width: ${fillLevel}%"
-                             aria-valuenow="${fillLevel}" aria-valuemin="0" aria-valuemax="100">
-                            ${fillLevel.toFixed(1)}%
-                        </div>
-                    </div>
-
-                    <div class="bin-stats">
-                        <div class="stat-item">
-                            <i class="bi bi-thermometer-half"></i>
-                            <span>${typeof temperature === 'number' ? temperature.toFixed(1) + '°C' : temperature}</span>
-                        </div>
-                        <div class="stat-item">
-                            <i class="bi bi-battery-half"></i>
-                            <span>${typeof battery === 'number' ? battery.toFixed(0) + '%' : battery}</span>
-                        </div>
-                        <div class="stat-item">
-                            <i class="bi bi-trash"></i>
-                            <span>${bin.bin_type}</span>
-                        </div>
-                    </div>
-
-                    ${bin.open_alerts > 0 ? `
-                        <div class="alert alert-warning alert-sm mt-2 mb-0 py-1">
-                            <i class="bi bi-exclamation-triangle"></i> ${bin.open_alerts} active alert(s)
-                        </div>
-                    ` : ''}
-
-                    <div class="text-muted mt-2" style="font-size: 0.75rem;">
-                        <i class="bi bi-clock"></i> ${lastReading}
-                    </div>
-                </div>
-            </div>
-        `;
-    }).join('');
+async function loadDailyWeight() {
+    try {
+        const r = await fetch(`${API_BASE_URL}/stats/daily-weight`).then(r => r.json());
+        if (!r.success) return;
+        dailyCache = r.data;
+        if (chartsVisible) updateBarChart(binsCache);
+    } catch(e) { console.error('loadDailyWeight:', e); }
 }
 
-// Load alerts
 async function loadAlerts() {
     try {
-        const response = await fetch(`${API_BASE_URL}/alerts?status=open`);
-        const result = await response.json();
-
-        if (result.success) {
-            renderAlerts(result.data);
-        }
-    } catch (error) {
-        console.error('Error loading alerts:', error);
-    }
+        const r = await fetch(`${API_BASE_URL}/alerts?status=open`).then(r => r.json());
+        if (!r.success) return;
+        alertsCache = r.data;
+        renderAlerts(r.data);
+    } catch(e) { console.error('loadAlerts error:', e); }
 }
 
-// Render alerts
-function renderAlerts(alerts) {
-    const container = document.getElementById('alertsList');
+/* ────────────────────────────────────────────────────
+   Status logic — Compliance-based (Senses Scale)
 
-    if (!alerts || alerts.length === 0) {
-        container.innerHTML = '<div class="empty-state"><i class="bi bi-check-circle"></i><p>No active alerts</p></div>';
+   green  (good)   : last_reading < 2 min  → กำลังชั่งขยะติดเชื้อ
+   yellow (medium) : last_reading 2min–24h → ยอดแล้ววันนี้
+   pink   (high)   : last_reading 24h–48h  → ยังไม่ยอดภายใน 24 ชม.
+   blue   (offline): last_reading > 48h    → ไม่ยอดเกิน 48 ชม.
+   mauve  (none)   : ไม่เคยมีข้อมูลเลย
+   ──────────────────────────────────────────────────── */
+
+const MIN2  =  2 * 60 * 1000;
+const H24   = 24 * 60 * 60 * 1000;
+const H48   = 48 * 60 * 60 * 1000;
+
+function cardStatus(bin) {
+    if (!bin.last_reading) return 'none';
+    const age = Date.now() - new Date(bin.last_reading).getTime();
+    if (age <  MIN2) return 'good';     // กำลังชั่ง (green)
+    if (age <  H24)  return 'medium';   // ยอดแล้ววันนี้ (yellow)
+    if (age <  H48)  return 'high';     // ยังไม่ยอด 24ชม. (pink)
+    return 'offline';                    // ไม่ยอดเกิน 48ชม. (blue-grey)
+}
+
+const STATUS_TH = {
+    good:    '🟢 กำลังชั่งขยะติดเชื้อ',
+    medium:  '🟡 ยอดแล้ววันนี้',
+    high:    '🩷 ยังไม่ยอดขยะภายใน 24 ชม.',
+    offline: '⚫ ไม่ยอดขยะเกิน 48 ชม.',
+    none:    '— ยังไม่เคยมีข้อมูล'
+};
+
+/* ────────────────────────────────────────────────────
+   Render: Department cards
+   ──────────────────────────────────────────────────── */
+
+function renderBins(bins) {
+    const grid = document.getElementById('binsGrid');
+
+    if (!bins || bins.length === 0) {
+        grid.innerHTML = '<div class="ss-empty"><i class="bi bi-inbox"></i><p>ไม่พบข้อมูลหน่วยงาน</p></div>';
         return;
     }
 
-    container.innerHTML = alerts.map(alert => {
-        const triggeredTime = new Date(alert.triggered_at).toLocaleString();
-        const severity = alert.severity || 'low';
+    // Count currently weighing
+    const activeCnt = bins.filter(b => cardStatus(b) === 'good').length;
+    document.getElementById('activeWeighing').textContent = `${activeCnt} / ${bins.length}`;
+    document.getElementById('totalDepts').textContent  = bins.length;
+    document.getElementById('totalDepts2').textContent = bins.length;
+
+    // Pie + Bar chart — only update when panel is visible (avoid canvas 0x0 error)
+    if (chartsVisible) {
+        try {
+            const dist = { good: 0, medium: 0, high: 0, offline: 0, none: 0 };
+            bins.forEach(b => { dist[cardStatus(b)] = (dist[cardStatus(b)] || 0) + 1; });
+            statusPieChart.data.datasets[0].data = [
+                dist.good, dist.medium, dist.high, dist.offline, dist.none
+            ];
+            statusPieChart.update();
+            updateBarChart(bins);
+        } catch(e) { console.warn('Chart update skipped:', e.message); }
+    }
+
+    // Filter
+    const filtered = currentFilter === 'all'
+        ? bins
+        : bins.filter(b => cardStatus(b) === currentFilter);
+
+    if (filtered.length === 0) {
+        grid.innerHTML = '<div class="ss-empty"><i class="bi bi-filter"></i><p>ไม่มีหน่วยงานในสถานะที่เลือก</p></div>';
+        return;
+    }
+
+    grid.innerHTML = filtered.map(bin => {
+        const cs      = cardStatus(bin);
+        const daily   = dailyCache.find(d => d.bin_id === bin.bin_id);
+        const todayKg = daily && daily.total_weight_today > 0
+            ? parseFloat(daily.total_weight_today).toFixed(2) + ' กก.'
+            : null;
+        const lastKg  = bin.weight_kg != null
+            ? parseFloat(bin.weight_kg).toFixed(2) + ' กก.'
+            : null;
+
+        // Sub-text: show today's total if available, else last reading
+        let subText = '';
+        if (cs === 'good') {
+            subText = lastKg ? `⚖️ ${lastKg}` : 'กำลังชั่ง...';
+        } else if (todayKg) {
+            subText = `วันนี้ ${todayKg}`;
+        } else if (lastKg) {
+            subText = `ล่าสุด ${lastKg}`;
+        }
 
         return `
-            <div class="alert-item severity-${severity} fade-in">
-                <div class="d-flex justify-content-between align-items-start">
-                    <div class="alert-type">${alert.alert_type.replace(/_/g, ' ')}</div>
-                    <span class="badge bg-${getSeverityColor(severity)}">${severity}</span>
-                </div>
-                <div class="alert-message">${alert.message}</div>
-                <div class="d-flex justify-content-between align-items-center mt-2">
-                    <div class="alert-time">
-                        <i class="bi bi-clock"></i> ${triggeredTime}
-                    </div>
-                    <div>
-                        <i class="bi bi-trash"></i> ${alert.bin_code}
-                    </div>
-                </div>
-            </div>
-        `;
+            <div class="ss-bin-card status-${cs} fade-in"
+                 onclick="openModal(${bin.bin_id})"
+                 title="คลิกเพื่อดูรายละเอียด">
+                ${cs === 'good' ? '<div class="ss-alert-dot ss-weighing-dot"></div>' : ''}
+                <div class="ss-card-name">${bin.location}</div>
+                ${subText ? `<div class="ss-card-sub">${subText}</div>` : ''}
+            </div>`;
     }).join('');
 }
 
-// Get severity color
-function getSeverityColor(severity) {
-    const colors = {
-        'low': 'info',
-        'medium': 'warning',
-        'high': 'warning',
-        'critical': 'danger'
-    };
-    return colors[severity] || 'secondary';
-}
+/* ────────────────────────────────────────────────────
+   Render: Alerts
+   ──────────────────────────────────────────────────── */
 
-// Load timeline data for charts
-async function loadTimelineData() {
-    try {
-        const response = await fetch(`${API_BASE_URL}/stats/timeline?hours=24`);
-        const result = await response.json();
+const ALERT_TYPE_TH = {
+    bin_full:         'น้ำหนักเกินขีด',
+    sensor_fault:     'แบตเตอรี่ต่ำ',
+    unusual_activity: 'อุณหภูมิสูง',
+    maintenance:      'บำรุงรักษา'
+};
 
-        if (result.success) {
-            updateFillLevelChart(result.data.fill_level_timeline);
-        }
-    } catch (error) {
-        console.error('Error loading timeline data:', error);
+function renderAlerts(alerts) {
+    const cnt = alerts?.length ?? 0;
+    const el  = document.getElementById('alertsList');
+    if (cnt === 0) {
+        el.innerHTML = '<div class="ss-empty"><i class="bi bi-check-circle"></i><p>ไม่มีการแจ้งเตือน</p></div>';
+        return;
     }
+    el.innerHTML = alerts.map(a => {
+        const sev    = a.severity || 'low';
+        const typeTh = ALERT_TYPE_TH[a.alert_type] || a.alert_type.replace(/_/g, ' ');
+        const t      = new Date(a.triggered_at).toLocaleString('th-TH', {
+            day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'
+        });
+        return `
+            <div class="ss-alert-item sev-${sev} fade-in">
+                <div class="ss-alert-title">${typeTh} · ${a.bin_code ?? ''}</div>
+                <div class="ss-alert-msg">${a.message}</div>
+                <div class="ss-alert-meta">
+                    <span><i class="bi bi-clock"></i> ${t}</span>
+                    <span>${sev.toUpperCase()}</span>
+                </div>
+            </div>`;
+    }).join('');
 }
 
-// Update fill level chart
-function updateFillLevelChart(timeline) {
-    if (!timeline || timeline.length === 0) return;
+/* ────────────────────────────────────────────────────
+   Charts update
+   ──────────────────────────────────────────────────── */
 
-    const labels = timeline.map(item => {
-        const date = new Date(item.hour);
-        return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+function updateBarChart(bins) {
+    if (!bins?.length) return;
+
+    // Sort by bin_id, get labels (short department name) and today's weight
+    const sorted = [...bins].sort((a, b) => a.bin_id - b.bin_id);
+    const labels = sorted.map(b => {
+        // Shorten long department names for chart
+        const loc = b.location || b.bin_code;
+        return loc.length > 14 ? loc.substring(0, 13) + '…' : loc;
+    });
+    const weights = sorted.map(b => {
+        const daily = dailyCache.find(d => d.bin_id === b.bin_id);
+        return daily ? parseFloat(daily.total_weight_today) || 0 : 0;
+    });
+    const colors = sorted.map(b => {
+        const cs = cardStatus(b);
+        return cs === 'good' ? 'rgba(168,216,176,0.85)'
+             : cs === 'medium' ? 'rgba(255,243,196,0.9)'
+             : cs === 'high' ? 'rgba(245,183,192,0.85)'
+             : 'rgba(201,213,224,0.75)';
     });
 
-    const data = timeline.map(item => parseFloat(item.avg_fill_level) || 0);
-
     fillLevelChart.data.labels = labels;
-    fillLevelChart.data.datasets[0].data = data;
+    fillLevelChart.data.datasets[0].data = weights;
+    fillLevelChart.data.datasets[0].backgroundColor = colors;
     fillLevelChart.update();
 }
 
-// Update last update time
-function updateLastUpdateTime() {
-    const now = new Date();
-    const timeString = now.toLocaleTimeString();
-    document.getElementById('lastUpdate').textContent = `Last updated: ${timeString}`;
-}
+/* ────────────────────────────────────────────────────
+   Misc
+   ──────────────────────────────────────────────────── */
 
-// Start auto-refresh
-function startAutoRefresh() {
-    refreshTimer = setInterval(() => {
-        loadDashboardData();
-    }, REFRESH_INTERVAL);
+function updateTime() {
+    const el = document.querySelector('.ss-last-update');
+    if (el) el.textContent = 'อัปเดต ' + new Date().toLocaleTimeString('th-TH');
 }
-
-// Stop auto-refresh
-function stopAutoRefresh() {
-    if (refreshTimer) {
-        clearInterval(refreshTimer);
-        refreshTimer = null;
-    }
-}
-
-// Show error message
-function showError(message) {
-    console.error(message);
-    // You can implement a toast notification here
-}
-
-// Clean up on page unload
-window.addEventListener('beforeunload', function() {
-    stopAutoRefresh();
-});

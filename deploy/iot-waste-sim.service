@@ -1,0 +1,23 @@
+[Unit]
+Description=IoT Waste Simulator
+After=network.target iot-waste-api.service
+Wants=iot-waste-api.service
+
+[Service]
+Type=simple
+User=senses
+Group=senses
+WorkingDirectory=/home/senses/iot-waste-platform/simulator
+EnvironmentFile=/home/senses/iot-waste-platform/.env
+ExecStart=/home/senses/iot-waste-platform/venv/bin/python3 iot_device_simulator.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=iot-waste-sim
+
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

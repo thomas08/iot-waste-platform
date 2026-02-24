@@ -1,0 +1,25 @@
+[Unit]
+Description=IoT Waste Platform API
+Documentation=https://tus.maker-hub.net
+After=network.target docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+User=senses
+Group=senses
+WorkingDirectory=/home/senses/iot-waste-platform/dashboard/api
+EnvironmentFile=/home/senses/iot-waste-platform/.env
+ExecStart=/home/senses/iot-waste-platform/venv/bin/python3 main.py
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=iot-waste-api
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

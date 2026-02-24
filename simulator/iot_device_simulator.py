@@ -8,8 +8,10 @@ import json
 import os
 import random
 import time
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from typing import Dict, List
+
+TH_TZ = timezone(timedelta(hours=7))   # Asia/Bangkok UTC+7
 from pathlib import Path
 import paho.mqtt.client as mqtt
 import logging
@@ -86,13 +88,13 @@ class WasteBinSensor:
             "bin_type": self.bin_type,
             "fill_level": round(self.fill_level, 2),
             "distance_cm": round(self.distance_cm, 2),
-            "weight_kg": round(self.fill_level * self.capacity / 100 * 0.5, 2),  # estimate
+            "weight_kg": round(random.uniform(0.5, 5.0), 3),  # infectious waste bag weight
             "temperature_c": round(self.temperature, 2),
             "humidity": round(random.uniform(40, 70), 2),
             "gas_level": round(random.uniform(0, 10), 2),
             "battery_level": round(self.battery_level, 2),
             "signal_strength": random.randint(-90, -30),  # RSSI
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now(TH_TZ).isoformat(),
         }
 
 
@@ -269,20 +271,12 @@ def main():
         return
 
     # Get configuration from environment
-    num_bins = int(os.getenv('SIMULATOR_NUM_BINS', '5'))
-    interval = int(os.getenv('SIMULATOR_INTERVAL', '10'))
+    interval = int(os.getenv('SIMULATOR_INTERVAL', '60'))
 
-    # Add waste bins to simulate (matching our database sample data)
-    if num_bins >= 1:
-        simulator.add_bin("1", "BIN001", "Building A - Floor 1", 120, "general")
-    if num_bins >= 2:
-        simulator.add_bin("2", "BIN002", "Building A - Floor 2", 120, "recycle")
-    if num_bins >= 3:
-        simulator.add_bin("3", "BIN003", "Building B - Floor 1", 240, "general")
-    if num_bins >= 4:
-        simulator.add_bin("4", "BIN004", "Parking Lot", 240, "general")
-    if num_bins >= 5:
-        simulator.add_bin("5", "BIN005", "Cafeteria", 180, "organic")
+    # Simulate active weighing departments (W-OT and W-SUR2)
+    # bin_id must match waste_bins.bin_id in DB; sensor_code auto-generated as SENS{bin_id.zfill(3)}
+    simulator.add_bin("6",  "W-OT",   "ห้องผ่าตัด",  50, "hazardous")
+    simulator.add_bin("12", "W-SUR2", "ศัลยกรรม 2", 50, "hazardous")
 
     logger.info("")
     logger.info(f"📊 Simulating {len(simulator.bins)} bins with {interval}s interval")

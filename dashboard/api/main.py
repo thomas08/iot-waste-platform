@@ -5,11 +5,14 @@ Provides REST API endpoints for frontend dashboard
 """
 
 import os
+import hashlib
+import secrets
 from pathlib import Path
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
+from fastapi.staticfiles import StaticFiles
 from typing import List, Optional
 from datetime import datetime, timedelta
 import psycopg2
@@ -17,6 +20,9 @@ from psycopg2.extras import RealDictCursor
 import logging
 from dotenv import load_dotenv
 import time
+
+# In-memory session store: {token: {username, role, display_name, expires}}
+_sessions: dict = {}
 
 # Load environment variables from .env file
 env_path = Path(__file__).parent.parent.parent / '.env'
@@ -103,6 +109,31 @@ def get_db_connection():
         raise HTTPException(status_code=500, detail="Database connection failed")
 
 
+def fix_ts(v):
+    """Append +07:00 to naive datetime strings so JavaScript parses them correctly."""
+    if isinstance(v, datetime):
+        if v.tzinfo is None:
+            return v.isoformat() + '+07:00'
+        return v.isoformat()
+    if isinstance(v, str) and len(v) >= 19 and v[10] == 'T' and '+' not in v and v[-1] != 'Z':
+        return v + '+07:00'
+    return v
+
+
+def normalize_row(row):
+    """Convert RealDictRow to plain dict and fix naive timestamps."""
+    if row is None:
+        return None
+    d = dict(row)
+    TS_KEYS = {'timestamp', 'last_reading', 'triggered_at', 'resolved_at',
+               'last_login', 'created_at', 'updated_at', 'installed_date',
+               'last_reading_today', 'collection_time'}
+    for k, v in d.items():
+        if k in TS_KEYS:
+            d[k] = fix_ts(v)
+    return d
+
+
 @app.on_event("startup")
 async def startup_event():
     """Log startup information"""
@@ -153,23 +184,26 @@ async def get_bins(status: Optional[str] = None):
                 longitude,
                 capacity,
                 bin_type,
-                status as bin_status,
+                bin_status,
                 fill_level,
+                weight_kg,
                 temperature_c,
                 battery_level,
+                signal_strength,
                 last_reading,
                 fill_status,
                 open_alerts
             FROM v_bin_current_status
+            WHERE bin_status = 'active'
         """
 
         if status:
-            query += " WHERE status = %s"
+            query += " AND bin_status = %s"
             cursor.execute(query, (status,))
         else:
             cursor.execute(query)
 
-        bins = cursor.fetchall()
+        bins = [normalize_row(b) for b in cursor.fetchall()]
         cursor.close()
         conn.close()
 
@@ -220,9 +254,9 @@ async def get_bin_detail(bin_id: int):
         return {
             "success": True,
             "data": {
-                "bin_info": bin_info,
-                "recent_readings": recent_readings,
-                "collections": collections
+                "bin_info": normalize_row(bin_info),
+                "recent_readings": [normalize_row(r) for r in recent_readings],
+                "collections": [normalize_row(c) for c in collections]
             }
         }
 
@@ -315,7 +349,7 @@ async def get_alerts(status: str = Query(default="open")):
             LIMIT 100
         """, (status,))
 
-        alerts = cursor.fetchall()
+        alerts = [normalize_row(a) for a in cursor.fetchall()]
         cursor.close()
         conn.close()
 
@@ -444,6 +478,134 @@ async def get_timeline_stats(hours: int = Query(default=24, ge=1, le=168)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/stats/daily-weight")
+async def get_daily_weight():
+    """Get today's total weight per bin (infectious waste weighing workflow)"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
+
+        cursor.execute("""
+            SELECT
+                wb.bin_id,
+                wb.bin_code,
+                wb.location,
+                COALESCE(SUM(sr.weight_kg), 0) as total_weight_today,
+                COUNT(sr.reading_id) as reading_count_today,
+                MAX(sr.timestamp) as last_reading_today
+            FROM waste_bins wb
+            LEFT JOIN sensor_readings sr
+                ON wb.bin_id = sr.bin_id
+                AND sr.timestamp >= NOW() - INTERVAL '24 hours'
+                AND sr.weight_kg > 0
+            WHERE wb.status = 'active'
+            GROUP BY wb.bin_id, wb.bin_code, wb.location
+            ORDER BY wb.bin_id
+        """)
+
+        daily = [normalize_row(r) for r in cursor.fetchall()]
+        cursor.close()
+        conn.close()
+
+        total_today = sum(float(r['total_weight_today']) for r in daily)
+
+        return {
+            "success": True,
+            "data": daily,
+            "total_weight_today": round(total_today, 2)
+        }
+
+    except Exception as e:
+        logger.error(f"Error fetching daily weight: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/auth/login")
+async def login(request: Request):
+    """Authenticate user and return session token"""
+    try:
+        body = await request.json()
+        username = (body.get("username") or "").strip()
+        password = (body.get("password") or "").strip()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid request body")
+
+    if not username or not password:
+        raise HTTPException(status_code=400, detail="กรุณากรอก Username และ Password")
+
+    password_hash = hashlib.sha256(password.encode()).hexdigest()
+
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
+        cursor.execute("""
+            SELECT user_id, username, full_name, role, status
+            FROM users
+            WHERE username = %s AND password_hash = %s AND status = 'active'
+        """, (username, password_hash))
+        user = cursor.fetchone()
+
+        if user:
+            cursor.execute(
+                "UPDATE users SET last_login = NOW() WHERE user_id = %s",
+                (user["user_id"],)
+            )
+            conn.commit()
+
+        cursor.close()
+        conn.close()
+    except Exception as e:
+        logger.error(f"Auth DB error: {e}")
+        raise HTTPException(status_code=500, detail="Database error")
+
+    if not user:
+        raise HTTPException(status_code=401, detail="ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง")
+
+    token = secrets.token_hex(32)
+    _sessions[token] = {
+        "user_id":      user["user_id"],
+        "username":     user["username"],
+        "display_name": user["full_name"] or user["username"],
+        "role":         user["role"],
+        "expires":      datetime.now() + timedelta(hours=8),
+    }
+
+    logger.info(f"Login: {username} (role={user['role']})")
+    return {
+        "success":      True,
+        "token":        token,
+        "username":     user["username"],
+        "display_name": user["full_name"] or user["username"],
+        "role":         user["role"],
+    }
+
+
+@app.post("/api/auth/logout")
+async def logout(request: Request):
+    """Invalidate session token"""
+    auth = request.headers.get("Authorization", "")
+    token = auth.replace("Bearer ", "").strip()
+    _sessions.pop(token, None)
+    return {"success": True}
+
+
+@app.get("/api/auth/verify")
+async def verify_token(request: Request):
+    """Verify if a session token is still valid"""
+    auth = request.headers.get("Authorization", "")
+    token = auth.replace("Bearer ", "").strip()
+    session = _sessions.get(token)
+    if not session or datetime.now() > session["expires"]:
+        _sessions.pop(token, None)
+        raise HTTPException(status_code=401, detail="Session expired")
+    return {
+        "success":      True,
+        "username":     session["username"],
+        "display_name": session["display_name"],
+        "role":         session["role"],
+    }
+
+
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""
@@ -459,6 +621,12 @@ async def health_check():
             status_code=503,
             content={"status": "unhealthy", "database": "disconnected", "error": str(e)}
         )
+
+
+# Serve frontend static files — must be mounted LAST so API routes take priority
+_frontend_dir = Path(__file__).parent.parent / "frontend"
+if _frontend_dir.exists():
+    app.mount("/", StaticFiles(directory=str(_frontend_dir), html=True), name="static")
 
 
 if __name__ == "__main__":

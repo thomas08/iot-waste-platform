@@ -1,0 +1,23 @@
+[Unit]
+Description=IoT Waste MQTT Subscriber
+After=network.target docker.service iot-waste-api.service
+Requires=docker.service
+
+[Service]
+Type=simple
+User=senses
+Group=senses
+WorkingDirectory=/home/senses/iot-waste-platform/backend
+EnvironmentFile=/home/senses/iot-waste-platform/.env
+ExecStart=/home/senses/iot-waste-platform/venv/bin/python3 mqtt_subscriber.py
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=iot-waste-sub
+
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

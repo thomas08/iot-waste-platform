@@ -1,154 +1,137 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="th">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>IoT Waste Management Dashboard</title>
-
-    <!-- Bootstrap CSS -->
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-
-    <!-- Bootstrap Icons -->
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css">
-
-    <!-- Chart.js -->
+    <title>ระบบชั่งน้ำหนักขยะติดเชื้อ</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-
-    <!-- Custom CSS -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <!-- Navbar -->
-    <nav class="navbar navbar-dark bg-success">
-        <div class="container-fluid">
-            <span class="navbar-brand mb-0 h1">
-                <i class="bi bi-recycle"></i> IoT Waste Management Dashboard
+
+    <!-- ── Navbar ─────────────────────────────────── -->
+    <nav class="ss-navbar">
+        <span class="ss-brand">Senses Scale</span>
+        <div style="display:flex;align-items:center;gap:12px;">
+            <span class="ss-username" id="navUsername"></span>
+            <span class="ss-logout" title="ออกจากระบบ" onclick="logout()">
+                <i class="bi bi-box-arrow-right"></i>
             </span>
-            <span class="badge bg-light text-success" id="lastUpdate">Loading...</span>
         </div>
     </nav>
 
-    <div class="container-fluid py-4">
-
-        <!-- Statistics Cards -->
-        <div class="row mb-4">
-            <div class="col-md-3">
-                <div class="card text-white bg-primary">
-                    <div class="card-body">
-                        <div class="d-flex justify-content-between align-items-center">
-                            <div>
-                                <h6 class="card-title">Total Bins</h6>
-                                <h2 class="mb-0" id="totalBins">--</h2>
-                            </div>
-                            <i class="bi bi-trash fs-1 opacity-50"></i>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <div class="col-md-3">
-                <div class="card text-white bg-warning">
-                    <div class="card-body">
-                        <div class="d-flex justify-content-between align-items-center">
-                            <div>
-                                <h6 class="card-title">Need Attention</h6>
-                                <h2 class="mb-0" id="binsNeedAttention">--</h2>
-                            </div>
-                            <i class="bi bi-exclamation-triangle fs-1 opacity-50"></i>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <div class="col-md-3">
-                <div class="card text-white bg-danger">
-                    <div class="card-body">
-                        <div class="d-flex justify-content-between align-items-center">
-                            <div>
-                                <h6 class="card-title">Active Alerts</h6>
-                                <h2 class="mb-0" id="activeAlerts">--</h2>
-                            </div>
-                            <i class="bi bi-bell-fill fs-1 opacity-50"></i>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <div class="col-md-3">
-                <div class="card text-white bg-info">
-                    <div class="card-body">
-                        <div class="d-flex justify-content-between align-items-center">
-                            <div>
-                                <h6 class="card-title">Avg Fill Level</h6>
-                                <h2 class="mb-0" id="avgFillLevel">--</h2>
-                            </div>
-                            <i class="bi bi-bar-chart-fill fs-1 opacity-50"></i>
-                        </div>
-                    </div>
-                </div>
-            </div>
+    <!-- ── Toolbar ────────────────────────────────── -->
+    <div class="ss-toolbar">
+        <div class="ss-toolbar-left">
+            <span class="ss-devcount">
+                Devices (<span id="totalDepts">--</span> / <span id="totalDepts2">--</span>)
+            </span>
         </div>
-
-        <!-- Charts Row -->
-        <div class="row mb-4">
-            <div class="col-md-8">
-                <div class="card">
-                    <div class="card-header bg-success text-white">
-                        <h5 class="mb-0"><i class="bi bi-graph-up"></i> Fill Level Timeline (Last 24 Hours)</h5>
-                    </div>
-                    <div class="card-body">
-                        <canvas id="fillLevelChart"></canvas>
-                    </div>
-                </div>
-            </div>
-
-            <div class="col-md-4">
-                <div class="card">
-                    <div class="card-header bg-success text-white">
-                        <h5 class="mb-0"><i class="bi bi-pie-chart"></i> Bin Status Distribution</h5>
-                    </div>
-                    <div class="card-body">
-                        <canvas id="statusPieChart"></canvas>
-                    </div>
-                </div>
-            </div>
+        <div class="ss-toolbar-center">
+            <span class="ss-online">Online (<span id="activeWeighing">--</span>)</span>
         </div>
-
-        <!-- Bins Grid and Alerts -->
-        <div class="row">
-            <div class="col-md-8">
-                <div class="card">
-                    <div class="card-header bg-success text-white">
-                        <h5 class="mb-0"><i class="bi bi-trash3"></i> Waste Bins Status</h5>
-                    </div>
-                    <div class="card-body">
-                        <div class="row" id="binsGrid">
-                            <!-- Bins will be populated here -->
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <div class="col-md-4">
-                <div class="card">
-                    <div class="card-header bg-danger text-white">
-                        <h5 class="mb-0"><i class="bi bi-bell"></i> Active Alerts</h5>
-                    </div>
-                    <div class="card-body" style="max-height: 500px; overflow-y: auto;">
-                        <div id="alertsList">
-                            <!-- Alerts will be populated here -->
-                        </div>
-                    </div>
-                </div>
-            </div>
+        <div class="ss-toolbar-right">
+            <button class="ss-btn" id="btnFilter" onclick="toggleFilter()">
+                <i class="bi bi-funnel-fill"></i> Filter
+            </button>
+            <button class="ss-btn" id="btnChart" onclick="toggleCharts()">
+                <i class="bi bi-bar-chart-fill"></i> Chart
+            </button>
+            <button class="ss-btn" onclick="showExportModal('csv')">
+                <i class="bi bi-filetype-csv"></i> CSV
+            </button>
+            <button class="ss-btn" onclick="showExportModal('xlsx')">
+                <i class="bi bi-file-earmark-spreadsheet"></i> Xlsx Report
+            </button>
         </div>
-
     </div>
 
-    <!-- Bootstrap JS -->
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <!-- ── Filter Panel ───────────────────────────── -->
+    <div id="filterPanel" class="ss-filter-panel ss-hidden">
+        <span class="ss-filter-label">กรองข้อมูลหน่วยงาน/อาคาร:</span>
+        <button class="ss-filter-btn active" data-status="all"     onclick="setFilter('all')">ทั้งหมด</button>
+        <button class="ss-filter-btn"        data-status="good"    onclick="setFilter('good')">🟢 กำลังชั่ง</button>
+        <button class="ss-filter-btn"        data-status="medium"  onclick="setFilter('medium')">🟡 ยอดแล้ววันนี้</button>
+        <button class="ss-filter-btn"        data-status="high"    onclick="setFilter('high')">🩷 ยังไม่ยอด 24 ชม.</button>
+        <button class="ss-filter-btn"        data-status="offline" onclick="setFilter('offline')">⚫ ไม่ยอดเกิน 48 ชม.</button>
+    </div>
 
-    <!-- Custom JS -->
+    <!-- ── Charts Panel ───────────────────────────── -->
+    <div id="chartsPanel" class="ss-charts-panel ss-hidden">
+        <div class="ss-charts-inner">
+            <div class="ss-chart-card">
+                <div class="ss-chart-header">
+                    <i class="bi bi-graph-up"></i> น้ำหนักขยะติดเชื้อสะสมวันนี้ (กก.) แยกตามหน่วยงาน
+                </div>
+                <canvas id="fillLevelChart"></canvas>
+            </div>
+            <div class="ss-chart-card">
+                <div class="ss-chart-header">
+                    <i class="bi bi-pie-chart-fill"></i> สัดส่วนสถานะหน่วยงาน
+                </div>
+                <canvas id="statusPieChart"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <!-- ── Main Grid ───────────────────────────────── -->
+    <div class="ss-main">
+        <div id="binsGrid" class="ss-grid"></div>
+    </div>
+
+    <!-- ── Overlay layers ────────────────────────── -->
+    <div id="overlayBg"    class="ss-overlay-bg ss-hidden" onclick="closeAllPanels()"></div>
+    <div id="overlayModal" class="ss-overlay-bg ss-hidden" onclick="closeModal()"></div>
+
+    <!-- ── Alerts Side Panel ──────────────────────── -->
+    <div id="alertsPanel" class="ss-alerts-panel ss-hidden">
+        <div class="ss-alerts-header">
+            <span><i class="bi bi-bell-fill"></i> การแจ้งเตือน</span>
+            <button class="ss-close" onclick="closeAllPanels()">&#x2715;</button>
+        </div>
+        <div id="alertsList" class="ss-alerts-list"></div>
+    </div>
+
+    <!-- ── Export Modal ───────────────────────────── -->
+    <div id="exportModal" class="ss-modal ss-hidden">
+        <div class="ss-modal-header">
+            <span id="exportTitle">Export to CSV</span>
+            <button class="ss-close" onclick="closeExport()">&#x2715;</button>
+        </div>
+        <div class="ss-modal-body ss-export-body">
+            <div class="ss-export-row">
+                <label class="ss-export-label">Start</label>
+                <div class="ss-export-inputs">
+                    <input type="date" id="exportStartDate" class="ss-input">
+                    <input type="time" id="exportStartTime" class="ss-input" value="00:00">
+                </div>
+            </div>
+            <div class="ss-export-row">
+                <label class="ss-export-label">End</label>
+                <div class="ss-export-inputs">
+                    <input type="date" id="exportEndDate" class="ss-input">
+                    <input type="time" id="exportEndTime" class="ss-input" value="23:59">
+                </div>
+            </div>
+            <div class="ss-export-actions">
+                <button class="ss-btn ss-btn-export" id="exportDoBtn" onclick="doExport()">
+                    Export
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ── Detail Modal ───────────────────────────── -->
+    <div id="detailModal" class="ss-modal ss-hidden">
+        <div class="ss-modal-header">
+            <span id="modalTitle">รายละเอียดหน่วยงาน</span>
+            <button class="ss-close" onclick="closeModal()">&#x2715;</button>
+        </div>
+        <div id="modalBody" class="ss-modal-body"></div>
+    </div>
+
     <script src="app.js"></script>
 </body>
 </html>

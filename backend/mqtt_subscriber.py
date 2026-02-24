@@ -103,7 +103,7 @@ class DatabaseManager:
                 data.get('gas_level'),
                 data.get('battery_level'),
                 data.get('signal_strength'),
-                data.get('timestamp')
+                data.get('timestamp') or datetime.now().astimezone().isoformat()
             )
 
             self.cursor.execute(insert_query, values)
@@ -279,10 +279,6 @@ class MQTTSubscriber:
 
     def start(self):
         """Start the subscriber (blocking)"""
-        if not self.connected:
-            logger.error("❌ Not connected to MQTT broker!")
-            return
-
         logger.info("🚀 MQTT Subscriber service started")
         logger.info("📊 Waiting for sensor data...")
         logger.info("Press Ctrl+C to stop\n")

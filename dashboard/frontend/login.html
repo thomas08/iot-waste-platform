@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>เข้าสู่ระบบ — Senses Scale</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css" rel="stylesheet">
+    <style>
+        /* ── Variables (Senses Scale) ── */
+        :root {
+            --bg-page:    #FFFDE7;
+            --bg-navbar:  #FFF9C4;
+            --gold:       #E8C84B;
+            --gold-dark:  #C8A820;
+            --brown:      #5D4037;
+            --brown-dark: #4E342E;
+            --brown-mute: #8D6E63;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            background: var(--bg-page);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            color: var(--brown);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        /* ── Login Card ── */
+        .login-card {
+            background: #fff;
+            border: 2px solid var(--gold);
+            border-radius: 12px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.12);
+            width: 100%;
+            max-width: 400px;
+            overflow: hidden;
+        }
+
+        .login-header {
+            background: var(--bg-navbar);
+            border-bottom: 2px solid var(--gold);
+            padding: 28px 24px 22px;
+            text-align: center;
+        }
+
+        .login-icon {
+            font-size: 2.8rem;
+            color: var(--brown-dark);
+            margin-bottom: 8px;
+            display: block;
+        }
+
+        .login-title {
+            font-size: 1.35rem;
+            font-weight: 700;
+            color: var(--brown-dark);
+            margin-bottom: 4px;
+        }
+
+        .login-subtitle {
+            font-size: 0.82rem;
+            color: var(--brown-mute);
+            font-weight: 500;
+        }
+
+        .login-body {
+            padding: 28px 28px 24px;
+        }
+
+        /* ── Form ── */
+        .form-group {
+            margin-bottom: 18px;
+        }
+
+        .form-label {
+            display: block;
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: var(--brown-dark);
+            margin-bottom: 6px;
+        }
+
+        .input-wrap {
+            position: relative;
+            display: flex;
+            align-items: center;
+        }
+
+        .ss-input {
+            width: 100%;
+            background: var(--bg-navbar);
+            border: 1.5px solid var(--gold);
+            border-radius: 6px;
+            padding: 10px 40px 10px 12px;
+            font-size: 0.92rem;
+            color: var(--brown-dark);
+            outline: none;
+            font-family: inherit;
+            transition: border-color 0.15s, background 0.15s;
+        }
+
+        .ss-input:focus {
+            border-color: var(--gold-dark);
+            background: #FFF9A0;
+        }
+
+        .ss-input::placeholder { color: var(--brown-mute); opacity: 0.7; }
+
+        /* Input prefix icon */
+        .input-prefix {
+            position: absolute;
+            left: 11px;
+            color: var(--brown-mute);
+            font-size: 1rem;
+            pointer-events: none;
+        }
+
+        .ss-input.has-prefix { padding-left: 36px; }
+
+        /* Show/hide password button */
+        .eye-btn {
+            position: absolute;
+            right: 10px;
+            background: none;
+            border: none;
+            color: var(--brown-mute);
+            font-size: 1rem;
+            cursor: pointer;
+            padding: 2px;
+            line-height: 1;
+        }
+        .eye-btn:hover { color: var(--brown-dark); }
+
+        /* ── Error box ── */
+        .login-error {
+            background: #FDE8E8;
+            border: 1.5px solid #E8939E;
+            border-radius: 6px;
+            color: #C0392B;
+            font-size: 0.85rem;
+            font-weight: 600;
+            padding: 10px 14px;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .hidden { display: none !important; }
+
+        /* ── Login button ── */
+        .btn-login {
+            width: 100%;
+            background: var(--bg-navbar);
+            border: 1.5px solid var(--gold);
+            color: var(--brown-dark);
+            border-radius: 6px;
+            padding: 11px 20px;
+            font-size: 0.95rem;
+            font-weight: 700;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            transition: background 0.12s;
+            font-family: inherit;
+        }
+
+        .btn-login:hover:not(:disabled) { background: #FFF176; }
+        .btn-login:active:not(:disabled) { background: #F5C518; }
+
+        .btn-login:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        /* loading spinner */
+        .spinner {
+            width: 16px; height: 16px;
+            border: 2px solid var(--brown-mute);
+            border-top-color: var(--brown-dark);
+            border-radius: 50%;
+            animation: spin 0.7s linear infinite;
+            flex-shrink: 0;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        .btn-login .spinner { display: none; }
+        .btn-login.loading .spinner { display: block; }
+        .btn-login.loading .btn-icon { display: none; }
+
+        /* ── Footer ── */
+        .login-footer {
+            text-align: center;
+            padding: 12px 24px 16px;
+            font-size: 0.75rem;
+            color: var(--brown-mute);
+            border-top: 1px solid #E8C84B44;
+        }
+
+        /* ── Responsive ── */
+        @media (max-width: 440px) {
+            .login-body { padding: 20px 18px 18px; }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="login-card">
+
+        <!-- Header -->
+        <div class="login-header">
+            <i class="bi bi-clipboard2-pulse login-icon"></i>
+            <div class="login-title">Senses Scale</div>
+            <div class="login-subtitle">ระบบชั่งน้ำหนักขยะติดเชื้อ</div>
+        </div>
+
+        <!-- Body -->
+        <div class="login-body">
+
+            <!-- Error message -->
+            <div id="loginError" class="login-error hidden">
+                <i class="bi bi-exclamation-circle-fill"></i>
+                <span id="loginErrorMsg">ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง</span>
+            </div>
+
+            <!-- Form -->
+            <form id="loginForm" onsubmit="doLogin(event)">
+
+                <div class="form-group">
+                    <label class="form-label" for="username">Username</label>
+                    <div class="input-wrap">
+                        <i class="bi bi-person-fill input-prefix"></i>
+                        <input
+                            type="text"
+                            id="username"
+                            class="ss-input has-prefix"
+                            placeholder="กรอก username"
+                            autocomplete="username"
+                            autofocus
+                        >
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label" for="password">Password</label>
+                    <div class="input-wrap">
+                        <i class="bi bi-lock-fill input-prefix"></i>
+                        <input
+                            type="password"
+                            id="password"
+                            class="ss-input has-prefix"
+                            placeholder="กรอกรหัสผ่าน"
+                            autocomplete="current-password"
+                        >
+                        <button type="button" class="eye-btn" id="eyeBtn" onclick="togglePassword()">
+                            <i class="bi bi-eye" id="eyeIcon"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <button type="submit" class="btn-login" id="loginBtn">
+                    <i class="bi bi-box-arrow-in-right btn-icon"></i>
+                    <div class="spinner"></div>
+                    <span id="loginBtnText">เข้าสู่ระบบ</span>
+                </button>
+
+            </form>
+        </div>
+
+        <!-- Footer -->
+        <div class="login-footer">
+            Senses Scale &nbsp;·&nbsp; IoT Waste Management v1.0
+        </div>
+
+    </div>
+
+    <script>
+        const API = '';
+
+        // Redirect if already logged in
+        if (sessionStorage.getItem('ss_token')) {
+            window.location.replace('index.html');
+        }
+
+        function togglePassword() {
+            const inp  = document.getElementById('password');
+            const icon = document.getElementById('eyeIcon');
+            if (inp.type === 'password') {
+                inp.type = 'text';
+                icon.className = 'bi bi-eye-slash';
+            } else {
+                inp.type = 'password';
+                icon.className = 'bi bi-eye';
+            }
+        }
+
+        function showError(msg) {
+            document.getElementById('loginErrorMsg').textContent = msg;
+            document.getElementById('loginError').classList.remove('hidden');
+        }
+
+        function hideError() {
+            document.getElementById('loginError').classList.add('hidden');
+        }
+
+        function setLoading(on) {
+            const btn  = document.getElementById('loginBtn');
+            const text = document.getElementById('loginBtnText');
+            btn.disabled = on;
+            btn.classList.toggle('loading', on);
+            text.textContent = on ? 'กำลังเข้าสู่ระบบ...' : 'เข้าสู่ระบบ';
+        }
+
+        async function doLogin(e) {
+            e.preventDefault();
+            hideError();
+
+            const username = document.getElementById('username').value.trim();
+            const password = document.getElementById('password').value;
+
+            if (!username || !password) {
+                showError('กรุณากรอก Username และ Password');
+                return;
+            }
+
+            setLoading(true);
+            try {
+                const res  = await fetch(`${API}/api/auth/login`, {
+                    method:  'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body:    JSON.stringify({ username, password }),
+                });
+                const data = await res.json();
+
+                if (res.ok && data.success) {
+                    sessionStorage.setItem('ss_token',        data.token);
+                    sessionStorage.setItem('ss_username',     data.username);
+                    sessionStorage.setItem('ss_display_name', data.display_name);
+                    sessionStorage.setItem('ss_role',         data.role);
+                    window.location.replace('index.html');
+                } else {
+                    showError(data.detail || 'เข้าสู่ระบบไม่สำเร็จ');
+                }
+            } catch (err) {
+                console.error(err);
+                showError('ไม่สามารถเชื่อมต่อ server ได้');
+            } finally {
+                setLoading(false);
+            }
+        }
+
+        // Allow Enter key on username field to jump to password
+        document.getElementById('username').addEventListener('keydown', e => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                document.getElementById('password').focus();
+            }
+        });
+    </script>
+
+</body>
+</html>
